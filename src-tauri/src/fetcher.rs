@@ -95,6 +95,62 @@ pub async fn fetch_mmr(
     body.map(|v| parse_mmr(&v)).unwrap_or((0, 0, 0))
 }
 
+pub fn parse_account_level(json: &Value) -> u32 {
+    json.get("Progress")
+        .and_then(|p| p.get("Level"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32
+}
+
+pub async fn fetch_account_level(
+    ctx: &AuthContext,
+    region: &Region,
+    version: &str,
+    puuid: &str,
+) -> u32 {
+    let url = format!("{}/account-xp/v1/players/{}", region.pd_base(), puuid);
+    let body: Option<Value> = async {
+        pvp_client()
+            .get(&url)
+            .headers(pvp_headers(ctx, version))
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()
+    }
+    .await;
+    body.map(|v| parse_account_level(&v)).unwrap_or(0)
+}
+
+/// Build a row for the signed-in user, for display when not in a match.
+pub async fn build_self(
+    ctx: &AuthContext,
+    region: &Region,
+    version: &str,
+    sd: &StaticData,
+) -> PlayerRow {
+    let puuids = [ctx.puuid.clone()];
+    let names = fetch_names(ctx, region, version, &puuids).await;
+    let (tier, rr, peak) = fetch_mmr(ctx, region, version, &ctx.puuid).await;
+    let level = fetch_account_level(ctx, region, version, &ctx.puuid).await;
+    PlayerRow {
+        puuid: ctx.puuid.clone(),
+        name: names.get(&ctx.puuid).cloned().unwrap_or_default(),
+        agent: String::new(),
+        team: String::new(),
+        party_id: String::new(),
+        hidden_name: false,
+        rank_tier: tier,
+        rank_name: sd.rank_name(tier),
+        rr,
+        peak_rank_name: sd.rank_name(peak),
+        peak_rank_tier: peak,
+        account_level: level,
+    }
+}
+
 pub async fn build_rows(
     ctx: &AuthContext,
     region: &Region,
@@ -119,18 +175,31 @@ pub async fn build_rows(
             (Some(_), _) => "Enemy".to_string(),
             (None, _) => p.team.clone(),
         };
+        let is_self = p.puuid == ctx.puuid;
+        let hidden_name = p.incognito && !is_self;
+        let name = if hidden_name {
+            String::new()
+        } else {
+            names.get(&p.puuid).cloned().unwrap_or_default()
+        };
+        let account_level = if p.hide_level && !is_self {
+            0
+        } else {
+            p.account_level
+        };
         rows.push(PlayerRow {
             puuid: p.puuid.clone(),
-            name: names.get(&p.puuid).cloned().unwrap_or_default(),
+            name,
             agent: sd.agent_name(&p.character_id),
             team,
             party_id: p.party_id.clone(),
+            hidden_name,
             rank_tier: tier,
             rank_name: sd.rank_name(tier),
             rr,
             peak_rank_name: sd.rank_name(peak),
             peak_rank_tier: peak,
-            account_level: p.account_level,
+            account_level,
         });
     }
     rows
@@ -161,6 +230,13 @@ mod tests {
     fn parses_mmr_handles_missing() {
         let v: Value = serde_json::from_str("{}").unwrap();
         assert_eq!(parse_mmr(&v), (0, 0, 0));
+    }
+
+    #[test]
+    fn parses_account_level() {
+        let v: Value = serde_json::from_str(r#"{"Progress":{"Level":237,"XP":1200}}"#).unwrap();
+        assert_eq!(parse_account_level(&v), 237);
+        assert_eq!(parse_account_level(&serde_json::json!({})), 0);
     }
 
     #[test]
