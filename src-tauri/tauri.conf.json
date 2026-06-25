@@ -14,8 +14,13 @@
       {
         "label": "main",
         "title": "val-companion",
-        "width": 900,
-        "height": 640
+        "width": 460,
+        "height": 680,
+        "minWidth": 380,
+        "minHeight": 420,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true
       }
     ],
     "security": {

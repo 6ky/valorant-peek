@@ -69,9 +69,17 @@ pub async fn run_loop(app: AppHandle) {
                 let _ = app.emit("match-view", &view);
             }
             None => {
-                let mut stale = last.clone();
-                stale.stale = true;
-                let _ = app.emit("match-view", &stale);
+                // Only surface a stale badge if we were actually showing a
+                // populated table. Otherwise this is just idle time with no
+                // game ready, which should read as "waiting".
+                if last.players.is_empty() {
+                    let idle = assemble_view(MatchState::NoGame, Vec::new(), false);
+                    let _ = app.emit("match-view", &idle);
+                } else {
+                    let mut stale = last.clone();
+                    stale.stale = true;
+                    let _ = app.emit("match-view", &stale);
+                }
             }
         }
         tokio::time::sleep(Duration::from_secs(3)).await;

@@ -20,6 +20,7 @@ pub struct PlayerRow {
     pub rank_name: String,
     pub rr: u32,
     pub peak_rank_name: String,
+    pub peak_rank_tier: u32,
     pub account_level: u32,
 }
 

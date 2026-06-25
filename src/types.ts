@@ -10,6 +10,7 @@ export interface PlayerRow {
   rankName: string;
   rr: number;
   peakRankName: string;
+  peakRankTier: number;
   accountLevel: number;
 }
 

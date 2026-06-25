@@ -105,19 +105,31 @@ pub async fn build_rows(
     let puuids: Vec<String> = players.iter().map(|p| p.puuid.clone()).collect();
     let names = fetch_names(ctx, region, version, &puuids).await;
 
+    let self_team = players
+        .iter()
+        .find(|p| p.puuid == ctx.puuid)
+        .map(|p| p.team.clone());
+
     let mut rows = Vec::with_capacity(players.len());
     for p in players {
         let (tier, rr, peak) = fetch_mmr(ctx, region, version, &p.puuid).await;
+        let team = match (&self_team, p.team.is_empty()) {
+            (_, true) => String::new(),
+            (Some(mine), _) if &p.team == mine => "Ally".to_string(),
+            (Some(_), _) => "Enemy".to_string(),
+            (None, _) => p.team.clone(),
+        };
         rows.push(PlayerRow {
             puuid: p.puuid.clone(),
             name: names.get(&p.puuid).cloned().unwrap_or_default(),
             agent: sd.agent_name(&p.character_id),
-            team: p.team.clone(),
+            team,
             party_id: p.party_id.clone(),
             rank_tier: tier,
             rank_name: sd.rank_name(tier),
             rr,
             peak_rank_name: sd.rank_name(peak),
+            peak_rank_tier: peak,
             account_level: p.account_level,
         });
     }

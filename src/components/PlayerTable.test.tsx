@@ -13,6 +13,7 @@ const rows: PlayerRow[] = [
     rankName: "Immortal 3",
     rr: 42,
     peakRankName: "Radiant",
+    peakRankTier: 27,
     accountLevel: 120,
   },
 ];
