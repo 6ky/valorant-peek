@@ -10,5 +10,62 @@ body {
 }
 
 .app {
-  padding: 24px;
+  padding: 16px 20px;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.app-header .title {
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: #ff4655;
+}
+
+.app-header .stale {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #f0a000;
+  border: 1px solid #f0a000;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.status {
+  padding: 48px 0;
+  text-align: center;
+  color: #8a8f98;
+  font-size: 15px;
+}
+
+.player-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.player-table th {
+  text-align: left;
+  font-weight: 500;
+  color: #8a8f98;
+  padding: 6px 10px;
+  border-bottom: 1px solid #23262e;
+}
+
+.player-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #1a1d24;
+}
+
+.player-table .name {
+  font-weight: 500;
+}
+
+.player-table .rr,
+.player-table .level {
+  color: #8a8f98;
 }
