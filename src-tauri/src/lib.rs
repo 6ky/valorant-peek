@@ -1,4 +1,8 @@
+mod auth;
+mod client_version;
+mod http;
 mod lockfile;
+mod model;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
