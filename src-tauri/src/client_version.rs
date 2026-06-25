@@ -17,6 +17,33 @@ impl Region {
     }
 }
 
+/// Pull region and shard out of a glz URL found in VALORANT's log, e.g.
+/// "https://glz-eu-1.eu.a.pvp.net". Returns (region, shard).
+pub fn parse_region_from_log(text: &str) -> Option<Region> {
+    let marker = "glz-";
+    let start = text.find(marker)?;
+    let rest = &text[start + marker.len()..];
+    let dash = rest.find("-1.")?;
+    let region = &rest[..dash];
+    let after = &rest[dash + 3..];
+    let dot = after.find(".a.pvp.net")?;
+    let shard = &after[..dot];
+    if region.is_empty() || shard.is_empty() {
+        return None;
+    }
+    Some(Region {
+        region: region.to_string(),
+        shard: shard.to_string(),
+    })
+}
+
+pub fn detect_region_from_log() -> Option<Region> {
+    let base = std::env::var("LOCALAPPDATA").ok()?;
+    let path = std::path::PathBuf::from(base).join(r"VALORANT\Saved\Logs\ShooterGame.log");
+    let text = std::fs::read_to_string(path).ok()?;
+    parse_region_from_log(&text)
+}
+
 pub fn parse_version(json: &Value) -> Option<String> {
     json.get("data")?
         .get("riotClientVersion")?
@@ -48,6 +75,27 @@ mod tests {
         };
         assert_eq!(r.pd_base(), "https://pd.na.a.pvp.net");
         assert_eq!(r.glz_base(), "https://glz-na-1.na.a.pvp.net");
+    }
+
+    #[test]
+    fn parses_region_from_log_line() {
+        let line = "info: connecting to https://glz-eu-1.eu.a.pvp.net/something";
+        let r = parse_region_from_log(line).unwrap();
+        assert_eq!(r.region, "eu");
+        assert_eq!(r.shard, "eu");
+    }
+
+    #[test]
+    fn region_from_log_handles_distinct_shard() {
+        let line = "https://glz-na-1.na.a.pvp.net";
+        let r = parse_region_from_log(line).unwrap();
+        assert_eq!(r.region, "na");
+        assert_eq!(r.shard, "na");
+    }
+
+    #[test]
+    fn region_from_log_none_when_absent() {
+        assert!(parse_region_from_log("no url here").is_none());
     }
 
     #[test]
