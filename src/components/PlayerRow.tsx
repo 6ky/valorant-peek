@@ -36,7 +36,9 @@ export function PlayerRow({ row }: { row: Row }) {
         {ranked ? row.rankName : "Unranked"}
       </span>
       <span className="prow-id">
-        <span className="prow-name">{row.name || "Unknown"}</span>
+        <span className={`prow-name${row.hiddenName ? " hidden" : ""}`}>
+          {row.hiddenName ? "Hidden" : row.name || "Unknown"}
+        </span>
         <span className="prow-meta">
           {row.agent && <span className="prow-agent">{row.agent}</span>}
           {row.agent && hasPeak && <span className="dot-sep">&middot;</span>}

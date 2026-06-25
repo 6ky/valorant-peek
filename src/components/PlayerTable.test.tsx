@@ -9,6 +9,7 @@ const rows: PlayerRow[] = [
     agent: "Jett",
     team: "Blue",
     partyId: "x",
+    hiddenName: false,
     rankTier: 21,
     rankName: "Immortal 3",
     rr: 42,

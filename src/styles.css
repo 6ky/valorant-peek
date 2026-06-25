@@ -99,6 +99,22 @@ body {
   }
 }
 
+.mode-pill {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #aab0b8;
+  background: #1a1e26;
+  border-radius: 4px;
+  padding: 3px 8px;
+}
+
+.prow-name.hidden {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .stale {
   font-size: 9.5px;
   letter-spacing: 1px;
@@ -141,14 +157,72 @@ body {
   padding: 12px;
 }
 
-.status {
+.idle {
   height: 100%;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 20px;
+}
+
+.status {
   color: var(--muted);
   font-size: 13px;
   letter-spacing: 0.4px;
+  text-align: center;
+}
+
+.profile {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.profile-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.profile-name {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.profile-level {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.profile-rank {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  padding: 8px 18px;
+  border: 1px solid;
+  border-radius: 6px;
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+}
+
+.profile-stats {
+  display: flex;
+  gap: 18px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.profile-stats b {
+  color: var(--text);
+  font-weight: 700;
 }
 
 /* Roster */

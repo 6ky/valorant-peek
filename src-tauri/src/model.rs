@@ -16,6 +16,7 @@ pub struct PlayerRow {
     pub agent: String,
     pub team: String,
     pub party_id: String,
+    pub hidden_name: bool,
     pub rank_tier: u32,
     pub rank_name: String,
     pub rr: u32,
@@ -28,6 +29,8 @@ pub struct PlayerRow {
 #[serde(rename_all = "camelCase")]
 pub struct MatchView {
     pub state: MatchState,
+    pub mode: String,
     pub players: Vec<PlayerRow>,
+    pub me: Option<PlayerRow>,
     pub stale: bool,
 }

@@ -4,8 +4,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { MatchView, MatchState } from "./types";
 import { StatusScreen } from "./components/StatusScreen";
 import { PlayerTable } from "./components/PlayerTable";
+import { ProfileCard } from "./components/ProfileCard";
 
-const INITIAL: MatchView = { state: "NoGame", players: [], stale: false };
+const INITIAL: MatchView = { state: "NoGame", mode: "", players: [], me: null, stale: false };
 
 const STATE_LABEL: Record<MatchState, string> = {
   NoGame: "Offline",
@@ -39,18 +40,44 @@ export default function App() {
           <span className="state-dot" />
           {STATE_LABEL[view.state]}
         </span>
+        {view.mode && live && <span className="mode-pill">{view.mode}</span>}
         {view.stale && <span className="stale">stale</span>}
         <span className="win-controls">
-          <button className="win-btn" onClick={() => win.minimize()} aria-label="Minimize">
+          <button
+            className="win-btn"
+            onClick={() => win.minimize()}
+            aria-label="Minimize"
+            title="Minimize"
+          >
             &#x2013;
           </button>
-          <button className="win-btn win-close" onClick={() => win.close()} aria-label="Close">
+          <button
+            className="win-btn"
+            onClick={() => win.hide()}
+            aria-label="Minimize to tray"
+            title="Minimize to tray"
+          >
+            &#x2304;
+          </button>
+          <button
+            className="win-btn win-close"
+            onClick={() => win.close()}
+            aria-label="Close"
+            title="Close"
+          >
             &#x2715;
           </button>
         </span>
       </header>
       <main className="app-body">
-        {showTable ? <PlayerTable players={view.players} /> : <StatusScreen state={view.state} />}
+        {showTable ? (
+          <PlayerTable players={view.players} />
+        ) : (
+          <div className="idle">
+            {view.me && <ProfileCard me={view.me} />}
+            <StatusScreen state={view.state} />
+          </div>
+        )}
       </main>
     </div>
   );
