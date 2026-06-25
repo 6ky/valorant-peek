@@ -1,5 +1,5 @@
 use crate::auth::fetch_auth;
-use crate::client_version::{fetch_client_version, Region};
+use crate::client_version::{detect_region_from_log, fetch_client_version, Region};
 use crate::fetcher::build_rows;
 use crate::lockfile::read_lockfile;
 use crate::match_state::current_state;
@@ -17,10 +17,15 @@ pub fn assemble_view(state: MatchState, rows: Vec<PlayerRow>, stale: bool) -> Ma
     }
 }
 
-fn region_from_env() -> Region {
-    let region = std::env::var("VAL_REGION").unwrap_or_else(|_| "na".to_string());
-    let shard = std::env::var("VAL_SHARD").unwrap_or_else(|_| region.clone());
-    Region { region, shard }
+fn resolve_region() -> Region {
+    if let Ok(region) = std::env::var("VAL_REGION") {
+        let shard = std::env::var("VAL_SHARD").unwrap_or_else(|_| region.clone());
+        return Region { region, shard };
+    }
+    detect_region_from_log().unwrap_or_else(|| Region {
+        region: "na".to_string(),
+        shard: "na".to_string(),
+    })
 }
 
 async fn poll_once(
@@ -53,7 +58,7 @@ pub async fn run_loop(app: AppHandle) {
         .unwrap_or_else(|_| PathBuf::from("."))
         .join("static");
     let static_data = load_or_fetch(&cache_dir).await;
-    let region = region_from_env();
+    let region = resolve_region();
     let mut version = fetch_client_version().await.ok();
     let mut last = assemble_view(MatchState::NoGame, Vec::new(), false);
 
