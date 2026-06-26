@@ -64,17 +64,14 @@ Common regions: `na`, `eu`, `ap`, `kr`, `br`, `latam`.
 
 ## Discord Rich Presence
 
-Peek can show your status ("In a Competitive match", your rank, elapsed time) on
-your Discord profile. It is off until you give it a Discord application id:
+Peek shows your status ("In a Competitive match", your rank, elapsed time) on
+your Discord profile, using one shared "Peek" Discord application baked into the
+build, so every user gets the same branding without registering anything. Just
+have the Discord desktop app running.
 
-1. Open https://discord.com/developers/applications and create a new
-   application named "Peek". Copy its Application ID.
-2. Optional, for the logo: under Rich Presence > Art Assets, upload the Peek
-   icon and name the asset key exactly `logo`.
-3. Set the environment variable `PEEK_DISCORD_APP_ID` to that Application ID,
-   then start Peek with the Discord desktop app running.
-
-If the variable is not set, rich presence stays off and nothing else changes.
+Maintainers set the shared application id in `DEFAULT_APP_ID`
+(`src-tauri/src/discord.rs`). Developers can point a local build at a different
+application with the `PEEK_DISCORD_APP_ID` environment variable.
 
 ## How it works
 

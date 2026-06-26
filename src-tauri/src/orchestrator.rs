@@ -1,6 +1,6 @@
 use crate::auth::fetch_auth;
 use crate::client_version::{detect_region_from_log, fetch_client_version, Region};
-use crate::discord::Rpc;
+use crate::discord::{resolve_app_id, Rpc};
 use crate::fetcher::{build_rows, build_self, fetch_history};
 use crate::lockfile::read_lockfile;
 use crate::match_state::current_state;
@@ -102,10 +102,7 @@ pub async fn run_loop(app: AppHandle) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let mut rpc = Rpc::new(
-        std::env::var("PEEK_DISCORD_APP_ID").unwrap_or_default(),
-        start,
-    );
+    let mut rpc = Rpc::new(resolve_app_id(), start);
 
     loop {
         let view = match poll_once(&static_data, &region, &mut version).await {
