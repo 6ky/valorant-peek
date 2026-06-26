@@ -506,6 +506,195 @@ body {
   background: #e23b49;
 }
 
+/* Animations */
+@keyframes appIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes appOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.app {
+  animation: appIn 0.3s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  transform-origin: center;
+}
+.app.exiting {
+  animation: appOut 0.2s ease forwards;
+}
+
+.roster,
+.idle {
+  animation: riseIn 0.32s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+.team {
+  animation: riseIn 0.34s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.team:nth-child(2) {
+  animation-delay: 0.06s;
+}
+
+.team-rows .prow {
+  animation: riseIn 0.34s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.team-rows .prow:nth-child(1) {
+  animation-delay: 0.04s;
+}
+.team-rows .prow:nth-child(2) {
+  animation-delay: 0.09s;
+}
+.team-rows .prow:nth-child(3) {
+  animation-delay: 0.14s;
+}
+.team-rows .prow:nth-child(4) {
+  animation-delay: 0.19s;
+}
+.team-rows .prow:nth-child(5) {
+  animation-delay: 0.24s;
+}
+
+.prow {
+  transition: background 0.14s ease, transform 0.14s ease, border-color 0.14s ease;
+}
+.prow:hover {
+  background: #171b23;
+  transform: translateX(3px);
+  border-color: #242a37;
+}
+
+.rank-tag {
+  transition: box-shadow 0.16s ease, transform 0.16s ease;
+}
+.prow:hover .rank-tag {
+  transform: scale(1.04);
+}
+
+.profile {
+  animation: scaleIn 0.34s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.history {
+  animation: riseIn 0.34s ease both;
+  animation-delay: 0.08s;
+}
+.history-row .hpill {
+  animation: popIn 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+.history-row .hpill:nth-child(2) {
+  animation-delay: 0.03s;
+}
+.history-row .hpill:nth-child(3) {
+  animation-delay: 0.06s;
+}
+.history-row .hpill:nth-child(4) {
+  animation-delay: 0.09s;
+}
+.history-row .hpill:nth-child(5) {
+  animation-delay: 0.12s;
+}
+.history-row .hpill:nth-child(n + 6) {
+  animation-delay: 0.15s;
+}
+
+.status {
+  animation: fadeIn 0.4s ease both;
+}
+
+.win-btn {
+  transition: background 0.12s ease, color 0.12s ease, transform 0.1s ease;
+}
+.win-btn:active {
+  transform: scale(0.9);
+}
+
+.state-pill,
+.mode-pill {
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.modal-backdrop {
+  animation: fadeIn 0.16s ease both;
+}
+.modal {
+  animation: modalIn 0.22s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.btn {
+  transition: background 0.12s ease, transform 0.1s ease;
+}
+.btn:active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  .app,
+  .app.exiting {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 ::-webkit-scrollbar {
   width: 8px;
 }
