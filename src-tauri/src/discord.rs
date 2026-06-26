@@ -13,11 +13,16 @@ pub fn resolve_app_id() -> String {
     }
 }
 
+// Drop and re-establish the connection every this many updates, so a Discord
+// restart that the IPC layer fails to surface as an error still recovers.
+const RECONNECT_EVERY: u32 = 5;
+
 pub struct Rpc {
     client: Option<DiscordIpcClient>,
     app_id: String,
     start: i64,
     last_key: String,
+    ticks: u32,
 }
 
 impl Rpc {
@@ -27,6 +32,7 @@ impl Rpc {
             app_id,
             start,
             last_key: String::new(),
+            ticks: 0,
         }
     }
 
@@ -51,7 +57,18 @@ impl Rpc {
     }
 
     pub fn update(&mut self, view: &MatchView) {
-        if !self.enabled() || !self.ensure_connected() {
+        if !self.enabled() {
+            return;
+        }
+        // Periodic self-heal: drop the connection so the reconnect below
+        // rebuilds it and re-applies the activity in this same tick.
+        self.ticks = self.ticks.wrapping_add(1);
+        if self.ticks % RECONNECT_EVERY == 0 {
+            if let Some(mut client) = self.client.take() {
+                let _ = client.close();
+            }
+        }
+        if !self.ensure_connected() {
             return;
         }
         let (details, state) = activity_text(view);
