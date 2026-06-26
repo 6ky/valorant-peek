@@ -25,27 +25,41 @@ export function PlayerRow({ row }: { row: Row }) {
         style={{ background: party ?? "transparent" }}
         title={party ? "In a party" : undefined}
       />
-      <span
-        className="rank-tag"
-        style={{
-          color,
-          borderColor: color,
-          boxShadow: tierGlow(row.rankTier) ? `0 0 12px ${color}55` : undefined,
-        }}
-      >
-        {ranked ? row.rankName : "Unranked"}
-      </span>
+      {row.agentIcon ? (
+        <img className="agent-ico" src={row.agentIcon} alt={row.agent} title={row.agent} />
+      ) : (
+        <span className="agent-ico empty" />
+      )}
+      {ranked && row.rankIcon ? (
+        <img
+          className="rank-ico"
+          src={row.rankIcon}
+          alt={row.rankName}
+          title={row.rankName}
+          style={{ filter: tierGlow(row.rankTier) ? `drop-shadow(0 0 6px ${color}99)` : undefined }}
+        />
+      ) : (
+        <span className="rank-ico-fallback" style={{ background: color }} title={row.rankName} />
+      )}
       <span className="prow-id">
         <span className={`prow-name${row.hiddenName ? " hidden" : ""}`}>
           {row.hiddenName ? "Hidden" : row.name || "Unknown"}
         </span>
         <span className="prow-meta">
-          {row.agent && <span className="prow-agent">{row.agent}</span>}
-          {row.agent && hasPeak && <span className="dot-sep">&middot;</span>}
+          <span style={{ color }}>{ranked ? row.rankName : "Unranked"}</span>
+          {row.games > 0 && (
+            <>
+              <span className="dot-sep">&middot;</span>
+              <span>{row.winRate}% wr</span>
+            </>
+          )}
           {hasPeak && (
-            <span>
-              peak <span style={{ color: tierColor(row.peakRankTier) }}>{row.peakRankName}</span>
-            </span>
+            <>
+              <span className="dot-sep">&middot;</span>
+              <span>
+                peak <span style={{ color: tierColor(row.peakRankTier) }}>{row.peakRankName}</span>
+              </span>
+            </>
           )}
         </span>
       </span>
@@ -54,9 +68,7 @@ export function PlayerRow({ row }: { row: Row }) {
           {ranked ? row.rr : "--"}
           <span className="unit">rr</span>
         </span>
-        <span className="prow-level">
-          {row.accountLevel > 0 ? `lvl ${row.accountLevel}` : ""}
-        </span>
+        <span className="prow-level">{row.accountLevel > 0 ? `lvl ${row.accountLevel}` : ""}</span>
       </span>
     </div>
   );
