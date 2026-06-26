@@ -28,6 +28,7 @@ export function ProfileCard({ me }: { me: PlayerRow }) {
 
       <div className="profile-rankname" style={{ color }}>
         {ranked ? me.rankName : "Unranked"}
+        {me.leaderboard > 0 && <span className="lb"> #{me.leaderboard}</span>}
       </div>
 
       <div className="profile-stats">
@@ -36,7 +37,10 @@ export function ProfileCard({ me }: { me: PlayerRow }) {
         </span>
         {me.games > 0 && (
           <span>
-            <b>{me.winRate}%</b> wr <span className="dim">({me.games}g)</span>
+            <b>
+              {me.wins}W {me.games - me.wins}L
+            </b>{" "}
+            <span className="dim">({me.winRate}%)</span>
           </span>
         )}
         {hasPeak && (

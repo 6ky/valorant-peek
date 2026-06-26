@@ -468,6 +468,12 @@ body {
   color: #aab0b8;
 }
 
+.lb {
+  color: #ffd166;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
 .dot-sep {
   margin: 0 5px;
 }

@@ -15,7 +15,9 @@ export interface PlayerRow {
   peakRankName: string;
   peakRankTier: number;
   winRate: number;
+  wins: number;
   games: number;
+  leaderboard: number;
   accountLevel: number;
 }
 
