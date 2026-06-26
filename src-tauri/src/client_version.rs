@@ -51,7 +51,37 @@ pub fn parse_version(json: &Value) -> Option<String> {
         .map(String::from)
 }
 
+/// Pull the running build out of the log, e.g. "release-13.00-shipping-32-4990475".
+/// The mmr endpoint rejects a mismatched version, and valorant-api can lag a
+/// patch behind, so the log is the more reliable source. Returns the last match,
+/// which is the most recent build the client logged.
+pub fn parse_version_from_log(text: &str) -> Option<String> {
+    let mut found = None;
+    for (i, _) in text.match_indices("release-") {
+        let rest = &text[i..];
+        let end = rest
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-'))
+            .unwrap_or(rest.len());
+        let token = &rest[..end];
+        if token.contains("-shipping-") {
+            found = Some(token.to_string());
+        }
+    }
+    found
+}
+
+fn version_from_log() -> Option<String> {
+    let base = std::env::var("LOCALAPPDATA").ok()?;
+    let path = std::path::PathBuf::from(base).join(r"VALORANT\Saved\Logs\ShooterGame.log");
+    let text = std::fs::read_to_string(path).ok()?;
+    parse_version_from_log(&text)
+}
+
 pub async fn fetch_client_version() -> Result<String, AuthError> {
+    // Prefer the running build from the log; fall back to valorant-api.
+    if let Some(v) = version_from_log() {
+        return Ok(v);
+    }
     let body: Value = crate::http::pvp_client()
         .get("https://valorant-api.com/v1/version")
         .send()
@@ -103,5 +133,16 @@ mod tests {
         let v: Value =
             serde_json::from_str(r#"{"data":{"riotClientVersion":"release-09.00-x"}}"#).unwrap();
         assert_eq!(parse_version(&v).unwrap(), "release-09.00-x");
+    }
+
+    #[test]
+    fn parses_version_from_log_line() {
+        let log = "info: branch release-13.00-shipping-31-1\nlater: release-13.00-shipping-32-4990475 connected\n";
+        // Returns the most recent build, ignoring the bare "release-" with no shipping.
+        assert_eq!(
+            parse_version_from_log(log).unwrap(),
+            "release-13.00-shipping-32-4990475"
+        );
+        assert!(parse_version_from_log("no version here").is_none());
     }
 }
