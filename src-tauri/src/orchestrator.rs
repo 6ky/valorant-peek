@@ -111,7 +111,7 @@ async fn poll_once(
     // Riot's match servers are only touched when we are actually in a pregame
     // or game, and in-game only once per match, like vry does it.
     let in_match = loop_state == "PREGAME" || loop_state == "INGAME";
-    let was_ingame = last_loop_state.as_str() == "INGAME";
+    let entered = last_loop_state.as_str() != loop_state;
     *last_loop_state = loop_state.to_string();
 
     if !in_match {
@@ -119,16 +119,16 @@ async fn poll_once(
         return Some(with_me(assemble_view(MatchState::Menu, mode, Vec::new(), false)));
     }
 
-    // The in-game roster is fixed, so fetch it once on entry and then reuse it.
-    // Pregame is short and re-fetched so agent locks appear as they happen.
-    let ingame_steady = loop_state == "INGAME" && was_ingame && !last.players.is_empty();
-    if ingame_steady {
-        return Some(with_me(assemble_view(
-            MatchState::CoreGame,
-            mode,
-            last.players.clone(),
-            false,
-        )));
+    // Like vry: hit Riot's match endpoints only on the transition into a
+    // pregame or game. Otherwise reuse the roster we already fetched. (We keep
+    // trying while we have no roster yet, in case the match was not ready.)
+    if !entered && !last.players.is_empty() {
+        let state = if loop_state == "INGAME" {
+            MatchState::CoreGame
+        } else {
+            MatchState::PreGame
+        };
+        return Some(with_me(assemble_view(state, mode, last.players.clone(), false)));
     }
 
     let (state, match_id, raw) = current_state(&ctx, region, &v).await;
