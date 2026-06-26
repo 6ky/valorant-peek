@@ -16,11 +16,12 @@
         "title": "Peek",
         "width": 1040,
         "height": 760,
-        "minWidth": 720,
-        "minHeight": 460,
+        "resizable": false,
+        "maximizable": false,
         "decorations": false,
         "transparent": true,
-        "alwaysOnTop": true
+        "alwaysOnTop": true,
+        "visible": false
       }
     ],
     "security": {

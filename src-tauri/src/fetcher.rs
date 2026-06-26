@@ -6,6 +6,33 @@ use crate::model::{HistoryEntry, PlayerRow, ScoreEntry};
 use crate::static_cache::StaticData;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::time::Duration;
+
+// Authed GET that parses JSON, backing off and retrying on HTTP 429. Reads
+// Retry-After (seconds) for the wait, defaulting to 5, plus a 1s buffer. Gives
+// up after 3 retries. Transport errors and parse errors return None.
+async fn get_json_retry(url: &str, ctx: &AuthContext, version: &str) -> Option<Value> {
+    for _ in 0..3 {
+        let resp = pvp_client()
+            .get(url)
+            .headers(pvp_headers(ctx, version))
+            .send()
+            .await
+            .ok()?;
+        if resp.status().as_u16() == 429 {
+            let secs = resp
+                .headers()
+                .get("Retry-After")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(5);
+            tokio::time::sleep(Duration::from_secs(secs + 1)).await;
+            continue;
+        }
+        return resp.json().await.ok();
+    }
+    None
+}
 
 #[derive(Debug, PartialEq, Eq, Default)]
 pub struct Mmr {
@@ -142,18 +169,7 @@ pub async fn fetch_mmr(
     puuid: &str,
 ) -> Option<Mmr> {
     let url = format!("{}/mmr/v1/players/{}", region.pd_base(), puuid);
-    let body: Option<Value> = async {
-        pvp_client()
-            .get(&url)
-            .headers(pvp_headers(ctx, version))
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()
-    }
-    .await;
+    let body = get_json_retry(&url, ctx, version).await;
     body.map(|v| parse_mmr(&v))
 }
 
@@ -247,9 +263,8 @@ pub fn parse_history(json: &Value, sd: &StaticData) -> Vec<HistoryEntry> {
         .collect()
 }
 
-/// Headshot percentage for a player, summed over every round's shot damage,
-/// the same way vry computes it.
-pub fn headshot_pct(detail: &Value, puuid: &str) -> u32 {
+/// Summed (head, body, leg) shots for a player across every round's damage.
+pub fn shot_counts(detail: &Value, puuid: &str) -> (u64, u64, u64) {
     let (mut head, mut body, mut leg) = (0u64, 0u64, 0u64);
     if let Some(rounds) = detail.get("roundResults").and_then(|r| r.as_array()) {
         for round in rounds {
@@ -269,6 +284,13 @@ pub fn headshot_pct(detail: &Value, puuid: &str) -> u32 {
             }
         }
     }
+    (head, body, leg)
+}
+
+/// Headshot percentage for a player, summed over every round's shot damage,
+/// the same way vry computes it.
+pub fn headshot_pct(detail: &Value, puuid: &str) -> u32 {
+    let (head, body, leg) = shot_counts(detail, puuid);
     let total = head + body + leg;
     if total > 0 {
         (head * 100 / total) as u32
@@ -384,18 +406,7 @@ async fn fetch_match_detail(
     match_id: &str,
 ) -> Option<Value> {
     let url = format!("{}/match-details/v1/matches/{}", region.pd_base(), match_id);
-    async {
-        pvp_client()
-            .get(&url)
-            .headers(pvp_headers(ctx, version))
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()
-    }
-    .await
+    get_json_retry(&url, ctx, version).await
 }
 
 /// Signed run of recent results and the RR sum over them. Walks Matches from
@@ -430,61 +441,109 @@ fn streak_and_trend(matches: &[Value]) -> (i32, i32) {
     (streak, rr_trend as i32)
 }
 
-/// Recent competitive snapshot for a player: kills, deaths and headshot% from
-/// their most recent match, plus their current streak and RR trend over the
-/// last handful of games. None if they have no recent comp match.
+// Recent win/loss record over the full Matches list, by RR sign.
+fn win_loss(matches: &[Value]) -> (u32, u32) {
+    let (mut wins, mut losses) = (0u32, 0u32);
+    for m in matches {
+        match m.get("RankedRatingEarned").and_then(|v| v.as_i64()).unwrap_or(0) {
+            x if x > 0 => wins += 1,
+            x if x < 0 => losses += 1,
+            _ => {}
+        }
+    }
+    (wins, losses)
+}
+
+// Number of recent competitive matches to aggregate K/D and headshot% over.
+const RECENT_GAMES: usize = 10;
+// Match-detail request budget split across the roster, so a big lobby fetches
+// fewer games per player and stays under the rate limit.
+const RECENT_GAMES_BUDGET: usize = 50;
+// Caps so a heavy roster load cannot burst into a rate limit: match-detail
+// requests in flight per player, and players fetched at once across the roster.
+// Product is the max requests in flight (3 x 2 = 6), kept low like vry, which
+// fetches fully sequentially and leans on backoff.
+const COMBAT_DETAIL_CONCURRENCY: usize = 2;
+const COMBAT_PLAYER_CONCURRENCY: usize = 3;
+
+/// Recent competitive form for a player: kills, deaths and headshot% aggregated
+/// over their last `games` competitive matches, plus streak, RR trend and
+/// win/loss record over the full recent Matches list. None when the history request
+/// fails or there are no comp matches; match details that fail to load are
+/// skipped and the rest are still aggregated.
 pub async fn fetch_player_recent(
     ctx: &AuthContext,
     region: &Region,
     version: &str,
     puuid: &str,
-) -> Option<(u32, u32, u32, i32, i32)> {
+    games: usize,
+) -> Option<(u32, u32, u32, i32, i32, u32, u32)> {
     let url = format!(
         "{}/mmr/v1/players/{}/competitiveupdates?startIndex=0&endIndex=10&queue=competitive",
         region.pd_base(),
         puuid
     );
-    let cu: Value = async {
-        pvp_client()
-            .get(&url)
-            .headers(pvp_headers(ctx, version))
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()
-    }
-    .await?;
+    let cu = get_json_retry(&url, ctx, version).await?;
     let matches = cu.get("Matches").and_then(|m| m.as_array())?;
+    if matches.is_empty() {
+        return None;
+    }
     let (streak, rr_trend) = streak_and_trend(matches);
+    let (recent_wins, recent_losses) = win_loss(matches);
 
-    let match_id = matches
-        .first()
-        .and_then(|m| m.get("MatchID"))
-        .and_then(|v| v.as_str())?
-        .to_string();
+    let ids: Vec<String> = matches
+        .iter()
+        .take(games)
+        .filter_map(|m| m.get("MatchID").and_then(|v| v.as_str()).map(String::from))
+        .collect();
 
-    let detail = fetch_match_detail(ctx, region, version, &match_id).await?;
-    let me = detail
-        .get("players")
-        .and_then(|p| p.as_array())
-        .and_then(|arr| {
-            arr.iter()
-                .find(|p| p.get("subject").and_then(|v| v.as_str()) == Some(puuid))
-        })?;
-    let stat = |k: &str| {
-        me.get("stats")
-            .and_then(|s| s.get(k))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32
-    };
+    // Fetch the match details in small concurrent chunks rather than all at
+    // once, so a heavy roster does not burst into a rate limit.
+    let mut details: Vec<Option<Value>> = Vec::with_capacity(ids.len());
+    for chunk in ids.chunks(COMBAT_DETAIL_CONCURRENCY) {
+        let part = futures::future::join_all(
+            chunk.iter().map(|id| fetch_match_detail(ctx, region, version, id)),
+        )
+        .await;
+        details.extend(part);
+    }
+
+    let (mut total_kills, mut total_deaths) = (0u64, 0u64);
+    let (mut head, mut body, mut leg) = (0u64, 0u64, 0u64);
+    for detail in details.into_iter().flatten() {
+        let me = detail
+            .get("players")
+            .and_then(|p| p.as_array())
+            .and_then(|arr| {
+                arr.iter()
+                    .find(|p| p.get("subject").and_then(|v| v.as_str()) == Some(puuid))
+            });
+        if let Some(me) = me {
+            let stat = |k: &str| {
+                me.get("stats")
+                    .and_then(|s| s.get(k))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0)
+            };
+            total_kills += stat("kills");
+            total_deaths += stat("deaths");
+        }
+        let (h, b, l) = shot_counts(&detail, puuid);
+        head += h;
+        body += b;
+        leg += l;
+    }
+
+    let shots = head + body + leg;
+    let hs_pct = if shots > 0 { (head * 100 / shots) as u32 } else { 0 };
     Some((
-        stat("kills"),
-        stat("deaths"),
-        headshot_pct(&detail, puuid),
+        total_kills as u32,
+        total_deaths as u32,
+        hs_pct,
         streak,
         rr_trend,
+        recent_wins,
+        recent_losses,
     ))
 }
 
@@ -531,7 +590,7 @@ fn vandal_fields(entry: &Value, sd: &StaticData) -> (String, String, String) {
         Some(id) if !id.is_empty() => id,
         _ => return Default::default(),
     };
-    let info = match sd.vandal_skin(id) {
+    let info = match sd.skin_info(id) {
         Some(i) => i,
         None => return Default::default(),
     };
@@ -545,14 +604,17 @@ fn vandal_fields(entry: &Value, sd: &StaticData) -> (String, String, String) {
     )
 }
 
-/// True when the loadout entry runs a melee skin other than the stock one.
-fn has_premium_melee(entry: &Value, default_melee: &str) -> bool {
-    if default_melee.is_empty() {
-        return false;
-    }
-    match melee_skin_id(entry) {
-        Some(id) if !id.is_empty() => !id.eq_ignore_ascii_case(default_melee),
-        _ => false,
+/// True when the loadout entry runs a melee skin other than the stock one. The
+/// equipped id is resolved through the skins map; the stock melee resolves to
+/// the name "Melee", anything else is premium.
+fn has_premium_melee(entry: &Value, sd: &StaticData) -> bool {
+    let id = match melee_skin_id(entry) {
+        Some(id) if !id.is_empty() => id,
+        _ => return false,
+    };
+    match sd.skin_info(id) {
+        Some(info) => !info.name.is_empty() && info.name != "Melee",
+        None => false,
     }
 }
 
@@ -634,7 +696,7 @@ pub async fn fetch_history(
     cache: &mut HashMap<String, MatchStats>,
 ) -> Vec<HistoryEntry> {
     let url = format!(
-        "{}/mmr/v1/players/{}/competitiveupdates?startIndex=0&endIndex=8&queue=competitive",
+        "{}/mmr/v1/players/{}/competitiveupdates?startIndex=0&endIndex=15&queue=competitive",
         region.pd_base(),
         ctx.puuid
     );
@@ -713,6 +775,11 @@ pub async fn build_self(
     let names = fetch_names(ctx, region, version, &puuids).await;
     let level = fetch_account_level(ctx, region, version, &ctx.puuid).await;
     let card_id = fetch_loadout_card(ctx, region, version, &ctx.puuid).await;
+    let (last_kills, last_deaths, last_hs, streak, rr_trend, recent_wins, recent_losses, has_combat) =
+        match fetch_player_recent(ctx, region, version, &ctx.puuid, RECENT_GAMES).await {
+            Some((k, d, h, s, t, w, l)) => (k, d, h, s, t, w, l, true),
+            None => (0, 0, 0, 0, 0, 0, 0, false),
+        };
     Some(PlayerRow {
         puuid: ctx.puuid.clone(),
         name: names.get(&ctx.puuid).cloned().unwrap_or_default(),
@@ -735,12 +802,14 @@ pub async fn build_self(
         games: mmr.games,
         leaderboard: mmr.leaderboard,
         account_level: level,
-        last_kills: 0,
-        last_deaths: 0,
-        last_hs: 0,
-        has_combat: false,
-        streak: 0,
-        rr_trend: 0,
+        last_kills,
+        last_deaths,
+        last_hs,
+        has_combat,
+        streak,
+        rr_trend,
+        recent_wins,
+        recent_losses,
         smurf_score: 0,
         party_size: 0,
         encounters: 0,
@@ -783,7 +852,7 @@ pub async fn build_rows(
     if let Some(mid) = match_id {
         if let Some(loadouts) = fetch_loadouts(ctx, region, version, mid).await {
             for entry in &loadouts {
-                let premium = has_premium_melee(entry, &sd.default_melee_skin);
+                let premium = has_premium_melee(entry, sd);
                 premium_by_index.push(premium);
                 let vandal = vandal_fields(entry, sd);
                 vandal_by_index.push(vandal.clone());
@@ -803,7 +872,7 @@ pub async fn build_rows(
         async move {
             let mmr = fetch_mmr(ctx, region, version, &puuid).await;
             let combat = if fetch_combat {
-                fetch_player_recent(ctx, region, version, &puuid).await
+                fetch_player_recent(ctx, region, version, &puuid, RECENT_GAMES).await
             } else {
                 None
             };
@@ -834,10 +903,11 @@ pub async fn build_rows(
         } else {
             p.account_level
         };
-        let (last_kills, last_deaths, last_hs, streak, rr_trend, has_combat) = match combat {
-            Some((k, d, h, s, t)) => (k, d, h, s, t, true),
-            None => (0, 0, 0, 0, 0, false),
-        };
+        let (last_kills, last_deaths, last_hs, streak, rr_trend, recent_wins, recent_losses, has_combat) =
+            match combat {
+                Some((k, d, h, s, t, w, l)) => (k, d, h, s, t, w, l, true),
+                None => (0, 0, 0, 0, 0, 0, 0, false),
+            };
         let party_size = if p.party_id.is_empty() {
             1
         } else {
@@ -882,6 +952,8 @@ pub async fn build_rows(
             has_combat,
             streak,
             rr_trend,
+            recent_wins,
+            recent_losses,
             smurf_score: smurf,
             party_size,
             encounters: 0,
@@ -918,6 +990,8 @@ pub async fn build_rows(
                     row.last_hs = prev.last_hs;
                     row.streak = prev.streak;
                     row.rr_trend = prev.rr_trend;
+                    row.recent_wins = prev.recent_wins;
+                    row.recent_losses = prev.recent_losses;
                     row.has_combat = true;
                 }
             }
@@ -925,6 +999,47 @@ pub async fn build_rows(
         rows.push(row);
     }
     rows
+}
+
+/// Second pass over an already-built roster: fill in K/D, headshot, streak and
+/// RR trend from each player's recent games. Throttled across the roster so a
+/// heavy load cannot burst. Players with no recent comp match keep has_combat
+/// false. Run after the roster is already on screen so ranks show immediately.
+pub async fn enrich_combat(
+    ctx: &AuthContext,
+    region: &Region,
+    version: &str,
+    rows: &mut [PlayerRow],
+    puuids: &[String],
+) {
+    // Split the match-detail budget across the whole roster so a big lobby
+    // fetches fewer games per player and stays under the rate limit, even when
+    // only a subset is being filled in this pass.
+    let games = (RECENT_GAMES_BUDGET / rows.len().max(1)).clamp(1, RECENT_GAMES);
+    let mut updates: Vec<(String, Option<(u32, u32, u32, i32, i32, u32, u32)>)> =
+        Vec::with_capacity(puuids.len());
+    for chunk in puuids.chunks(COMBAT_PLAYER_CONCURRENCY) {
+        let part = futures::future::join_all(chunk.iter().map(|puuid| async move {
+            let recent = fetch_player_recent(ctx, region, version, puuid, games).await;
+            (puuid.clone(), recent)
+        }))
+        .await;
+        updates.extend(part);
+    }
+    for (puuid, recent) in updates {
+        if let Some((k, d, h, s, t, w, l)) = recent {
+            if let Some(row) = rows.iter_mut().find(|r| r.puuid == puuid) {
+                row.last_kills = k;
+                row.last_deaths = d;
+                row.last_hs = h;
+                row.streak = s;
+                row.rr_trend = t;
+                row.recent_wins = w;
+                row.recent_losses = l;
+                row.has_combat = true;
+            }
+        }
+    }
 }
 
 /// Rebuild rows for the current match from cached rank data, refreshing only

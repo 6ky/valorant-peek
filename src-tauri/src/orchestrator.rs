@@ -2,8 +2,8 @@ use crate::auth::fetch_auth;
 use crate::client_version::{detect_region_from_log, fetch_client_version, Region};
 use crate::discord::{resolve_app_id, Rpc};
 use crate::encounter::EncounterStore;
-use crate::fetcher::{build_rows, build_self, fetch_history, refresh_rows, MatchStats};
-use std::collections::HashMap;
+use crate::fetcher::{build_rows, build_self, enrich_combat, fetch_history, refresh_rows, MatchStats};
+use std::collections::{HashMap, HashSet};
 use crate::lockfile::read_lockfile;
 use crate::match_state::current_state;
 use crate::model::{MatchState, MatchView, PlayerRow};
@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::Notify;
 
 pub fn assemble_view(
     state: MatchState,
@@ -34,6 +35,7 @@ pub fn assemble_view(
         map_image: String::new(),
         ally_score: 0,
         enemy_score: 0,
+        combat_loading: false,
     }
 }
 
@@ -52,6 +54,10 @@ fn resolve_region() -> Region {
 // every poll, to stay well under Riot's rate limits.
 const SELF_REFRESH_EVERY: u32 = 10;
 
+// How many players to fill combat stats for per poll, so they appear in batches
+// rather than all at once after a long wait.
+const COMBAT_CHUNK: usize = 3;
+
 fn unix_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -69,6 +75,8 @@ async fn poll_once(
     self_tick: &mut u32,
     match_cache: &mut HashMap<String, MatchStats>,
     encounters: &mut EncounterStore,
+    combat_done: &mut Option<String>,
+    combat_attempted: &mut HashSet<String>,
     fetch_combat: bool,
 ) -> Option<MatchView> {
     let lf = match read_lockfile() {
@@ -153,15 +161,29 @@ async fn poll_once(
     // ally-only roster would be reused for the whole match and the enemies would
     // never appear. Once the full core-game roster is loaded we settle and reuse
     // it, so this does not turn into continuous polling.
-    let loaded = !last.players.is_empty()
-        && (loop_state != "INGAME" || last.state == MatchState::CoreGame);
-    if !entered && loaded {
-        return Some(with_me(assemble_view(last.state, mode, last.players.clone(), false)));
+    // Reuse the roster only during an active game, where agents and ranks are
+    // fixed. In agent select we keep refetching so picks, lock state, and the
+    // countdown stay current. Even while reusing, the live score and map are
+    // refreshed from presence, which we read every poll.
+    let settled = !last.players.is_empty()
+        && loop_state == "INGAME"
+        && last.state == MatchState::CoreGame
+        && (!fetch_combat || combat_done.as_deref() == last_match_id.as_deref());
+    if !entered && settled {
+        let mut view = with_me(assemble_view(last.state, mode, last.players.clone(), false));
+        if let Some(p) = presence.as_ref() {
+            view.map = sd.map_name(&p.party_owner_match_map);
+            view.map_image = sd.map_image(&p.party_owner_match_map);
+            view.ally_score = p.ally_score;
+            view.enemy_score = p.enemy_score;
+        }
+        return Some(view);
     }
 
     let cs = current_state(&ctx, region, &v).await;
     let state = cs.state;
     let match_id = cs.match_id;
+    let cur_match_id = match_id.clone();
     let raw = cs.players;
     let phase_time = cs.phase_time;
     if raw.is_empty() {
@@ -181,8 +203,10 @@ async fn poll_once(
         } else {
             None
         };
+        // Phase one: ranks, names, agents, party, and skins only, so the roster
+        // appears fast. Combat stats are filled in by a throttled second pass.
         let mut fetched =
-            build_rows(&ctx, region, &v, &raw, sd, &last.players, fetch_combat, cg_match_id).await;
+            build_rows(&ctx, region, &v, &raw, sd, &last.players, false, cg_match_id).await;
         // Show how often we have seen each player and our record with them, then
         // record this game so later lobbies can show it. Reading the prior count
         // before recording keeps the current match out of the shown total.
@@ -207,8 +231,38 @@ async fn poll_once(
             }
         }
         *last_match_id = match_id;
+        *combat_done = None;
+        combat_attempted.clear();
         fetched
     };
+
+    // Phase two: fill in K/D and headshot progressively, a few players per poll,
+    // so the stats appear in batches and a counter can show progress. Each
+    // player is attempted once per match. Ranks already show from phase one, so
+    // the first batch is left for the next (fast) poll to keep ranks instant.
+    let want_combat =
+        fetch_combat && (state == MatchState::PreGame || state == MatchState::CoreGame);
+    let mut combat_loading = false;
+    if want_combat && !rows.is_empty() {
+        let pending: Vec<String> = rows
+            .iter()
+            .filter(|r| !r.has_combat && !combat_attempted.contains(&r.puuid))
+            .map(|r| r.puuid.clone())
+            .collect();
+        if pending.is_empty() {
+            *combat_done = cur_match_id.clone();
+        } else {
+            combat_loading = true;
+            if same_match {
+                let chunk: Vec<String> = pending.into_iter().take(COMBAT_CHUNK).collect();
+                enrich_combat(&ctx, region, &v, &mut rows, &chunk).await;
+                for puuid in &chunk {
+                    combat_attempted.insert(puuid.clone());
+                }
+            }
+        }
+    }
+
     if is_ffa(&queue_id) {
         for row in &mut rows {
             row.team.clear();
@@ -216,6 +270,7 @@ async fn poll_once(
     }
     let mut view = with_me(assemble_view(state, mode, rows, false));
     view.phase_time = phase_time;
+    view.combat_loading = combat_loading;
     if let Some(p) = presence.as_ref() {
         view.map = sd.map_name(&p.party_owner_match_map);
         view.map_image = sd.map_image(&p.party_owner_match_map);
@@ -250,8 +305,16 @@ pub async fn run_loop(
     let mut last_loop_state = String::new();
     let mut self_tick = 0u32;
     let mut match_cache: HashMap<String, MatchStats> = HashMap::new();
+    let mut combat_done: Option<String> = None;
+    let mut combat_attempted: HashSet<String> = HashSet::new();
+
+    // Wake on presence changes from the local websocket, falling back to the
+    // poll interval below if the socket is unavailable.
+    let wake = Arc::new(Notify::new());
+    tauri::async_runtime::spawn(crate::websocket::run_presence_socket(wake.clone()));
 
     loop {
+        let combat_on = combat_enabled.load(Ordering::Relaxed);
         let view = match poll_once(
             &static_data,
             &region,
@@ -262,7 +325,9 @@ pub async fn run_loop(
             &mut self_tick,
             &mut match_cache,
             &mut encounters,
-            combat_enabled.load(Ordering::Relaxed),
+            &mut combat_done,
+            &mut combat_attempted,
+            combat_on,
         )
         .await
         {
@@ -284,7 +349,18 @@ pub async fn run_loop(
 
         let _ = app.emit("match-view", &view);
         rpc.update(&view, rpc_enabled.load(Ordering::Relaxed));
-        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        // While combat stats are still filling in, poll again almost at once so
+        // the next batch lands quickly. Otherwise wait the normal interval,
+        // reacting sooner to a websocket presence change.
+        if view.combat_loading {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        } else {
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(3)) => {}
+                _ = wake.notified() => {}
+            }
+        }
     }
 }
 

@@ -10,6 +10,7 @@ mod model;
 mod orchestrator;
 mod presence;
 mod static_cache;
+mod websocket;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
