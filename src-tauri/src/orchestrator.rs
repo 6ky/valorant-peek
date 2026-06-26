@@ -51,6 +51,7 @@ async fn poll_once(
     version: &mut Option<String>,
     last: &MatchView,
     last_match_id: &mut Option<String>,
+    last_loop_state: &mut String,
     self_tick: &mut u32,
     match_cache: &mut HashMap<String, MatchStats>,
 ) -> Option<MatchView> {
@@ -100,10 +101,28 @@ async fn poll_once(
     let mode = mode_name(&queue_id);
     let loop_state = presence.as_ref().map(|p| p.loop_state.as_str()).unwrap_or("");
 
-    // In menus there is no match to read, so skip the heavier glz probe.
-    if loop_state == "MENUS" {
+    // Detect the game state transition from the local presence (a free call).
+    // Riot's match servers are only touched when we are actually in a pregame
+    // or game, and in-game only once per match, like vry does it.
+    let in_match = loop_state == "PREGAME" || loop_state == "INGAME";
+    let was_ingame = last_loop_state.as_str() == "INGAME";
+    *last_loop_state = loop_state.to_string();
+
+    if !in_match {
         *last_match_id = None;
         return Some(with_me(assemble_view(MatchState::Menu, mode, Vec::new(), false)));
+    }
+
+    // The in-game roster is fixed, so fetch it once on entry and then reuse it.
+    // Pregame is short and re-fetched so agent locks appear as they happen.
+    let ingame_steady = loop_state == "INGAME" && was_ingame && !last.players.is_empty();
+    if ingame_steady {
+        return Some(with_me(assemble_view(
+            MatchState::CoreGame,
+            mode,
+            last.players.clone(),
+            false,
+        )));
     }
 
     let (state, match_id, raw) = current_state(&ctx, region, &v).await;
@@ -147,6 +166,7 @@ pub async fn run_loop(app: AppHandle, rpc_enabled: Arc<AtomicBool>) {
         .unwrap_or(0);
     let mut rpc = Rpc::new(resolve_app_id(), start);
     let mut last_match_id: Option<String> = None;
+    let mut last_loop_state = String::new();
     let mut self_tick = 0u32;
     let mut match_cache: HashMap<String, MatchStats> = HashMap::new();
 
@@ -157,6 +177,7 @@ pub async fn run_loop(app: AppHandle, rpc_enabled: Arc<AtomicBool>) {
             &mut version,
             &last,
             &mut last_match_id,
+            &mut last_loop_state,
             &mut self_tick,
             &mut match_cache,
         )
