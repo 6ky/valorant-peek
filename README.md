@@ -13,6 +13,17 @@ light and reliable: it runs as its own window (no in-game overlay, no effect on
 your FPS) and reads straight from your own running Riot client, so it does not
 depend on any third-party website staying up.
 
+## Install
+
+One line in PowerShell grabs the latest release and installs it:
+
+```powershell
+irm https://raw.githubusercontent.com/6ky/valorant-peek/main/install.ps1 | iex
+```
+
+Or download the `Peek_x.x.x_x64-setup.exe` from the
+[releases page](https://github.com/6ky/valorant-peek/releases/latest) and run it.
+
 ## Screens
 
 - **Match**: the live roster. Allies stacked above enemies with a team win rate
