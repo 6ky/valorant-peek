@@ -1,7 +1,7 @@
 use crate::auth::fetch_auth;
 use crate::client_version::{detect_region_from_log, fetch_client_version, Region};
 use crate::discord::{resolve_app_id, Rpc};
-use crate::fetcher::{build_rows, build_self, fetch_history};
+use crate::fetcher::{build_rows, build_self, fetch_history, refresh_rows};
 use crate::lockfile::read_lockfile;
 use crate::match_state::current_state;
 use crate::model::{MatchState, MatchView, PlayerRow};
@@ -40,14 +40,24 @@ fn resolve_region() -> Region {
     })
 }
 
+// Refresh the self profile roughly every this many polls (3s each), instead of
+// every poll, to stay well under Riot's rate limits.
+const SELF_REFRESH_EVERY: u32 = 10;
+
 async fn poll_once(
     sd: &StaticData,
     region: &Region,
     version: &mut Option<String>,
+    last: &MatchView,
+    last_match_id: &mut Option<String>,
+    self_tick: &mut u32,
 ) -> Option<MatchView> {
     let lf = match read_lockfile() {
         Ok(lf) => lf,
-        Err(_) => return Some(assemble_view(MatchState::NoGame, String::new(), Vec::new(), false)),
+        Err(_) => {
+            *last_match_id = None;
+            return Some(assemble_view(MatchState::NoGame, String::new(), Vec::new(), false));
+        }
     };
     let ctx = fetch_auth(&lf).await.ok()?;
     if version.is_none() {
@@ -55,10 +65,27 @@ async fn poll_once(
     }
     let v = version.clone()?;
 
-    let me = build_self(&ctx, region, &v, sd).await;
-    let history = fetch_history(&ctx, region, &v, sd).await;
+    // Refresh the profile only periodically (or if we have none yet). Keep the
+    // last known value on a transient failure instead of flashing unranked.
+    *self_tick = self_tick.wrapping_add(1);
+    let refresh_self = last.me.is_none() || *self_tick % SELF_REFRESH_EVERY == 0;
+    let me = if refresh_self {
+        build_self(&ctx, region, &v, sd).await.or_else(|| last.me.clone())
+    } else {
+        last.me.clone()
+    };
+    let history = if refresh_self {
+        let fresh = fetch_history(&ctx, region, &v, sd).await;
+        if fresh.is_empty() {
+            last.history.clone()
+        } else {
+            fresh
+        }
+    } else {
+        last.history.clone()
+    };
     let with_me = |view: MatchView| MatchView {
-        me: Some(me.clone()),
+        me: me.clone(),
         history: history.clone(),
         ..view
     };
@@ -73,14 +100,26 @@ async fn poll_once(
 
     // In menus there is no match to read, so skip the heavier glz probe.
     if loop_state == "MENUS" {
+        *last_match_id = None;
         return Some(with_me(assemble_view(MatchState::Menu, mode, Vec::new(), false)));
     }
 
-    let (state, _match_id, raw) = current_state(&ctx, region, &v).await;
+    let (state, match_id, raw) = current_state(&ctx, region, &v).await;
     if raw.is_empty() {
+        *last_match_id = None;
         return Some(with_me(assemble_view(state, mode, Vec::new(), false)));
     }
-    let mut rows = build_rows(&ctx, region, &v, &raw, sd).await;
+
+    // Fetch every player's rank only when the match changes. Within the same
+    // match, refresh the cheap fields (agent, team) and keep cached ranks.
+    let same_match = match_id.is_some() && *last_match_id == match_id && !last.players.is_empty();
+    let mut rows = if same_match {
+        refresh_rows(&last.players, &raw, sd, &ctx.puuid)
+    } else {
+        let fetched = build_rows(&ctx, region, &v, &raw, sd, &last.players).await;
+        *last_match_id = match_id;
+        fetched
+    };
     if is_ffa(&queue_id) {
         for row in &mut rows {
             row.team.clear();
@@ -105,9 +144,20 @@ pub async fn run_loop(app: AppHandle, rpc_enabled: Arc<AtomicBool>) {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let mut rpc = Rpc::new(resolve_app_id(), start);
+    let mut last_match_id: Option<String> = None;
+    let mut self_tick = 0u32;
 
     loop {
-        let view = match poll_once(&static_data, &region, &mut version).await {
+        let view = match poll_once(
+            &static_data,
+            &region,
+            &mut version,
+            &last,
+            &mut last_match_id,
+            &mut self_tick,
+        )
+        .await
+        {
             Some(view) => {
                 last = view.clone();
                 view
