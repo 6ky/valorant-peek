@@ -31,6 +31,8 @@ const rows: PlayerRow[] = [
     hasCombat: true,
     streak: 0,
     rrTrend: 0,
+    recentWins: 0,
+    recentLosses: 0,
     smurfScore: 0,
     partySize: 1,
     encounters: 0,

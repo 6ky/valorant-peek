@@ -24,6 +24,7 @@ const INITIAL: MatchView = {
   mapImage: "",
   allyScore: 0,
   enemyScore: 0,
+  combatLoading: false,
 };
 
 const STATE_LABEL: Record<MatchState, string> = {
@@ -49,6 +50,9 @@ export default function App() {
     invoke("set_combat_enabled", {
       enabled: localStorage.getItem("peek.combat") !== "false",
     });
+    // The window starts hidden so the dark UI is painted before it appears,
+    // avoiding a white flash. Reveal it on the next frame.
+    requestAnimationFrame(() => win.show());
   }, []);
 
   function performExit(action: "tray" | "quit") {

@@ -84,7 +84,7 @@ export function PlayerRow({
   if (diff >= 2.2) rankTone = isEnemy ? "tone-bad" : "tone-good";
   else if (diff <= -2.2) rankTone = isEnemy ? "tone-good" : "tone-bad";
 
-  const side = dm ? "" : isEnemy ? "enemy" : "ally";
+  const side = dm ? "dm" : isEnemy ? "enemy" : "ally";
   const cls = ["prow", side, stack ? "party" : "", danger ? "danger" : "", picking ? "picking" : ""]
     .filter(Boolean)
     .join(" ");
@@ -121,10 +121,16 @@ export function PlayerRow({
             </span>
           )}
           {isSmurf && <span className="badge smurf">Smurf?</span>}
-          {row.streak !== 0 && (
-            <span className={`badge ${row.streak < 0 ? "streak-bad" : "streak-good"}`}>
-              {row.streak < 0 ? "L" : "W"}
-              {Math.abs(row.streak)}
+          {row.recentWins + row.recentLosses > 0 && (
+            <span
+              className={`badge ${row.recentWins >= row.recentLosses ? "streak-good" : "streak-bad"}`}
+              title={
+                row.streak !== 0
+                  ? `${Math.abs(row.streak)} ${row.streak < 0 ? "loss" : "win"} streak, recent record ${row.recentWins}-${row.recentLosses}`
+                  : `recent record ${row.recentWins}-${row.recentLosses}`
+              }
+            >
+              {row.recentWins}-{row.recentLosses}
             </span>
           )}
           {row.encounters > 0 && (
@@ -132,14 +138,6 @@ export function PlayerRow({
               seen x{row.encounters}
             </span>
           )}
-        </div>
-      </div>
-
-      <div className="cell rank">
-        <Emblem tier={row.rankTier} icon={row.rankIcon} />
-        <div className="nm">
-          <b className={rankTone}>{ranked ? row.rankName : "Unranked"}</b>
-          {row.leaderboard > 0 && <span className="lb"> #{row.leaderboard}</span>}
         </div>
       </div>
 
@@ -158,6 +156,14 @@ export function PlayerRow({
         ) : (
           <span className="skname faint">Default</span>
         )}
+      </div>
+
+      <div className="cell rank">
+        <Emblem tier={row.rankTier} icon={row.rankIcon} />
+        <div className="nm">
+          <b className={rankTone}>{ranked ? row.rankName : "Unranked"}</b>
+          {row.leaderboard > 0 && <span className="lb"> #{row.leaderboard}</span>}
+        </div>
       </div>
 
       <div className="cell num tone-neutral">

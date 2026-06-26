@@ -94,18 +94,11 @@ export function ProfileCard({ me, history }: { me: PlayerRow; history: HistoryEn
   const color = divColor(me.rankTier);
   const hasPeak = Boolean(me.peakRankName) && me.peakRankName !== "Unranked";
 
-  // Headline K/D and HS are derived from recent history (act-wide values are
-  // not available), so they are labeled "recent".
-  // TODO: act-wide self K/D and HS need backend support.
-  const withStats = history.filter((h) => h.hasStats);
-  const recentKd =
-    withStats.length > 0
-      ? withStats.reduce((s, h) => s + kdOf(h.kills, h.deaths), 0) / withStats.length
-      : null;
-  const recentHs =
-    withStats.length > 0
-      ? withStats.reduce((s, h) => s + h.hs, 0) / withStats.length
-      : null;
+  // Recent form K/D and headshot for the signed in user, the same window and
+  // source the in-match roster uses per player, so your own value reads the
+  // same on both screens. Act-wide self stats are not available from the API.
+  const recentKd = me.hasCombat ? kdOf(me.lastKills, me.lastDeaths) : null;
+  const recentHs = me.hasCombat ? me.lastHs : null;
 
   const net = history.reduce((s, h) => s + h.rrChange, 0);
   const { agents, total } = topAgents(history);
@@ -179,7 +172,7 @@ export function ProfileCard({ me, history }: { me: PlayerRow; history: HistoryEn
         <div className="stat">
           <div className="k">Headshot &middot; recent</div>
           <div className="v">
-            {recentHs !== null ? recentHs.toFixed(1) : "--"}
+            {recentHs !== null ? recentHs.toFixed(0) : "--"}
             <small>%</small>
           </div>
         </div>

@@ -254,6 +254,23 @@ body {
   color: var(--amber);
   letter-spacing: 0.04em;
 }
+.ctx-loading {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.ctx-loading-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+  animation: pulse 1.2s ease-in-out infinite;
+}
 
 /* views */
 .view {
@@ -334,7 +351,7 @@ body {
 .colhdr,
 .prow {
   display: grid;
-  grid-template-columns: 3px 34px minmax(146px, 1.2fr) 132px 128px 48px 50px 46px 82px 146px;
+  grid-template-columns: 3px 34px minmax(140px, 1.2fr) 184px 120px 48px 50px 46px 82px 140px;
   align-items: center;
 }
 .colhdr {
@@ -505,6 +522,18 @@ body {
 .pid .lvl b {
   color: var(--faint);
   font-weight: 500;
+}
+/* Deathmatch rows are shorter to fit a full lobby, so tighten the player cell
+   to keep the name and level line both visible. */
+.prow.dm .pid {
+  gap: 0;
+}
+.prow.dm .name {
+  font-size: 12.5px;
+  line-height: 1.25;
+}
+.prow.dm .bot {
+  line-height: 1;
 }
 .badge {
   font-family: "IBM Plex Mono";
