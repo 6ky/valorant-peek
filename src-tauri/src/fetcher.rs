@@ -29,6 +29,12 @@ async fn get_json_retry(url: &str, ctx: &AuthContext, version: &str) -> Option<V
             tokio::time::sleep(Duration::from_secs(secs + 1)).await;
             continue;
         }
+        // Do not treat an error body (e.g. a 404 from a version mismatch) as
+        // data; return None so callers keep the last known value instead of
+        // flashing unranked.
+        if !resp.status().is_success() {
+            return None;
+        }
         return resp.json().await.ok();
     }
     None
