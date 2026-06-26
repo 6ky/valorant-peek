@@ -34,7 +34,7 @@ export default function App() {
     <div className="app">
       <header className="titlebar" data-tauri-drag-region>
         <span className="wordmark" data-tauri-drag-region>
-          VAL<span className="wordmark-accent">/</span>COMPANION
+          PEE<span className="wordmark-accent">K</span>
         </span>
         <span className={`state-pill ${live ? "state-live" : ""}`}>
           <span className="state-dot" />
