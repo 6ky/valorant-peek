@@ -41,6 +41,9 @@ impl Rpc {
         if let Ok(mut client) = DiscordIpcClient::new(&self.app_id) {
             if client.connect().is_ok() {
                 self.client = Some(client);
+                // Force the next update to re-apply the activity on this fresh
+                // connection, even if the status text has not changed.
+                self.last_key.clear();
                 return true;
             }
         }
