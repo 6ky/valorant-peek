@@ -15,12 +15,29 @@ export interface PlayerRow {
   rr: number;
   peakRankName: string;
   peakRankTier: number;
+  peakRankIcon: string;
   peakAct: string;
   winRate: number;
   wins: number;
   games: number;
   leaderboard: number;
   accountLevel: number;
+  lastKills: number;
+  lastDeaths: number;
+  lastHs: number;
+  hasCombat: boolean;
+  streak: number;
+  rrTrend: number;
+  smurfScore: number;
+  partySize: number;
+  encounters: number;
+  encounterWins: number;
+  encounterLosses: number;
+  locked: boolean;
+  premiumSkins: boolean;
+  vandalSkin: string;
+  vandalImage: string;
+  vandalTierColor: string;
 }
 
 export interface ScoreEntry {
@@ -30,6 +47,7 @@ export interface ScoreEntry {
   deaths: number;
   assists: number;
   acs: number;
+  hs: number;
   ally: boolean;
   isSelf: boolean;
 }
@@ -40,10 +58,13 @@ export interface HistoryEntry {
   tier: number;
   rankName: string;
   agentIcon: string;
+  agentName: string;
+  mapImage: string;
   kills: number;
   deaths: number;
   assists: number;
   acs: number;
+  hs: number;
   selfRounds: number;
   enemyRounds: number;
   won: boolean;
@@ -59,4 +80,9 @@ export interface MatchView {
   me: PlayerRow | null;
   history: HistoryEntry[];
   stale: boolean;
+  phaseTime: number;
+  map: string;
+  mapImage: string;
+  allyScore: number;
+  enemyScore: number;
 }

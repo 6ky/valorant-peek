@@ -3,10 +3,9 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { MatchView, MatchState } from "./types";
+import { MatchScreen } from "./components/MatchScreen";
+import { IdleScreen } from "./components/IdleScreen";
 import { StatusScreen } from "./components/StatusScreen";
-import { PlayerTable } from "./components/PlayerTable";
-import { ProfileCard } from "./components/ProfileCard";
-import { RecentMatches } from "./components/RecentMatches";
 import { CloseDialog } from "./components/CloseDialog";
 import { Settings } from "./components/Settings";
 
@@ -20,13 +19,18 @@ const INITIAL: MatchView = {
   me: null,
   history: [],
   stale: false,
+  phaseTime: 0,
+  map: "",
+  mapImage: "",
+  allyScore: 0,
+  enemyScore: 0,
 };
 
 const STATE_LABEL: Record<MatchState, string> = {
   NoGame: "Offline",
-  Menu: "Menu",
+  Menu: "Idle",
   PreGame: "Agent Select",
-  CoreGame: "Live",
+  CoreGame: "In match",
 };
 
 export default function App() {
@@ -41,6 +45,9 @@ export default function App() {
     win.setAlwaysOnTop(localStorage.getItem("peek.alwaysOnTop") !== "false");
     invoke("set_rpc_enabled", {
       enabled: localStorage.getItem("peek.rpcEnabled") !== "false",
+    });
+    invoke("set_combat_enabled", {
+      enabled: localStorage.getItem("peek.combat") !== "false",
     });
   }, []);
 
@@ -76,63 +83,67 @@ export default function App() {
     };
   }, []);
 
-  const showTable =
+  const showMatch =
     (view.state === "CoreGame" || view.state === "PreGame") && view.players.length > 0;
-  const live = view.state === "CoreGame" || view.state === "PreGame";
-  const queued = view.activity.toLowerCase().includes("queue");
-  const pillKind = live ? "live" : queued ? "queue" : "";
+  const showStandby = !showMatch && view.state === "NoGame";
+
+  // Status dot/label. Live and idle read green; standby reads faint. Prefixed
+  // so the state class cannot collide with layout classes like .idle.
+  const statusKind = showStandby ? "s-off" : showMatch ? "s-live" : "s-idle";
+  const statusLabel = view.activity || STATE_LABEL[view.state];
 
   return (
     <div className={`app${exiting ? " exiting" : ""}`}>
-      <header className="titlebar" data-tauri-drag-region>
-        <span className="wordmark" data-tauri-drag-region>
-          PEE<span className="wordmark-accent">K</span>
-        </span>
-        <span className={`state-pill ${pillKind ? `state-${pillKind}` : ""}`}>
-          <span className="state-dot" />
-          {view.activity || STATE_LABEL[view.state]}
-        </span>
-        {view.stale && <span className="stale">stale</span>}
-        <span className="win-controls">
+      <div className="titlebar" data-tauri-drag-region>
+        <div className="wordmark" data-tauri-drag-region>
+          <span className="peek-name">PEEK</span>
+        </div>
+        <div className="status">
+          <span className={`dot ${statusKind}`} />
+          <span className="lbl">{statusLabel}</span>
+          {view.stale && <span className="stale">stale</span>}
+        </div>
+        <div className="wins">
           <button
-            className="win-btn"
-            onClick={() => setShowSettings(true)}
-            aria-label="Settings"
+            className="wbtn"
             title="Settings"
+            aria-label="Settings"
+            onClick={() => setShowSettings(true)}
           >
-            &#x2699;
+            <svg width="13" height="13" viewBox="0 0 13 13">
+              <line x1="2" y1="3.5" x2="11" y2="3.5" stroke="currentColor" strokeWidth="1.3" />
+              <line x1="2" y1="9.5" x2="11" y2="9.5" stroke="currentColor" strokeWidth="1.3" />
+              <circle cx="8" cy="3.5" r="1.7" fill="var(--bg)" stroke="currentColor" strokeWidth="1.3" />
+              <circle cx="5" cy="9.5" r="1.7" fill="var(--bg)" stroke="currentColor" strokeWidth="1.3" />
+            </svg>
+          </button>
+          <button className="wbtn" title="Minimize" aria-label="Minimize" onClick={() => win.minimize()}>
+            <svg width="12" height="12" viewBox="0 0 12 12">
+              <line x1="2.5" y1="6" x2="9.5" y2="6" stroke="currentColor" strokeWidth="1.4" />
+            </svg>
           </button>
           <button
-            className="win-btn"
-            onClick={() => win.minimize()}
-            aria-label="Minimize"
-            title="Minimize"
-          >
-            &#x2013;
-          </button>
-          <button
-            className="win-btn win-close"
-            onClick={onCloseClick}
-            aria-label="Close"
+            className="wbtn close"
             title="Close"
+            aria-label="Close"
+            onClick={onCloseClick}
           >
-            &#x2715;
+            <svg width="12" height="12" viewBox="0 0 12 12">
+              <line x1="3" y1="3" x2="9" y2="9" stroke="currentColor" strokeWidth="1.4" />
+              <line x1="9" y1="3" x2="3" y2="9" stroke="currentColor" strokeWidth="1.4" />
+            </svg>
           </button>
-        </span>
-      </header>
-      <main className="app-body">
-        {showTable ? (
-          <PlayerTable players={view.players} />
-        ) : (
-          <div className="idle">
-            <div className="idle-inner">
-              {view.me && <ProfileCard me={view.me} />}
-              <RecentMatches history={view.history} />
-              <StatusScreen state={view.state} />
-            </div>
-          </div>
-        )}
-      </main>
+        </div>
+      </div>
+
+      {showMatch ? (
+        <MatchScreen view={view} />
+      ) : showStandby ? (
+        <StatusScreen state={view.state} history={view.history} />
+      ) : (
+        <IdleScreen me={view.me} history={view.history} />
+      )}
+
       {askClose && (
         <CloseDialog
           onTray={(remember) => resolveClose("tray", remember)}

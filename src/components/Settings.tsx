@@ -23,6 +23,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
   );
   const [onTop, setOnTop] = useState(localStorage.getItem("peek.alwaysOnTop") !== "false");
   const [rpc, setRpc] = useState(localStorage.getItem("peek.rpcEnabled") !== "false");
+  const [combat, setCombat] = useState(localStorage.getItem("peek.combat") !== "false");
 
   function changeClose(v: CloseAction) {
     setCloseAction(v);
@@ -40,6 +41,12 @@ export function Settings({ onClose }: { onClose: () => void }) {
     setRpc(v);
     localStorage.setItem("peek.rpcEnabled", String(v));
     invoke("set_rpc_enabled", { enabled: v });
+  }
+
+  function changeCombat(v: boolean) {
+    setCombat(v);
+    localStorage.setItem("peek.combat", String(v));
+    invoke("set_combat_enabled", { enabled: v });
   }
 
   return (
@@ -85,6 +92,18 @@ export function Settings({ onClose }: { onClose: () => void }) {
               <div className="setting-desc">Show your Peek status on Discord</div>
             </div>
             <Toggle on={rpc} onChange={changeRpc} />
+          </div>
+        </div>
+
+        <div className="setting">
+          <div className="setting-row">
+            <div>
+              <div className="setting-label">Lobby K/D &amp; headshot %</div>
+              <div className="setting-desc">
+                Fetches each player's last match when a game loads. One request per player, only at match start.
+              </div>
+            </div>
+            <Toggle on={combat} onChange={changeCombat} />
           </div>
         </div>
       </div>
