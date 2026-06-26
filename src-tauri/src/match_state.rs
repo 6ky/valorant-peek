@@ -13,6 +13,7 @@ pub struct RawPlayer {
     pub account_level: u32,
     pub incognito: bool,
     pub hide_level: bool,
+    pub player_card_id: String,
 }
 
 pub fn parse_match_players(json: &Value) -> Vec<RawPlayer> {
@@ -36,6 +37,13 @@ pub fn parse_match_players(json: &Value) -> Vec<RawPlayer> {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false)
             };
+            let id_str = |k: &str| {
+                identity
+                    .and_then(|id| id.get(k))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
             RawPlayer {
                 puuid: s("Subject"),
                 team: s("TeamID"),
@@ -44,6 +52,7 @@ pub fn parse_match_players(json: &Value) -> Vec<RawPlayer> {
                 account_level: id_u64("AccountLevel") as u32,
                 incognito: id_bool("Incognito"),
                 hide_level: id_bool("HideAccountLevel"),
+                player_card_id: id_str("PlayerCardID"),
             }
         })
         .collect()

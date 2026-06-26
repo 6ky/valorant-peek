@@ -9,6 +9,7 @@ pub struct StaticData {
     pub agents: HashMap<String, String>,
     pub agent_icons: HashMap<String, String>,
     pub maps: HashMap<String, String>,
+    pub card_arts: HashMap<String, String>,
 }
 
 impl StaticData {
@@ -33,6 +34,10 @@ impl StaticData {
 
     pub fn map_name(&self, map_url: &str) -> String {
         self.maps.get(map_url).cloned().unwrap_or_default()
+    }
+
+    pub fn card_art(&self, id: &str) -> String {
+        self.card_arts.get(id).cloned().unwrap_or_default()
     }
 }
 
@@ -112,6 +117,20 @@ pub fn parse_maps(json: &Value) -> HashMap<String, String> {
     out
 }
 
+pub fn parse_player_cards(json: &Value) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let cards = json.get("data").and_then(|d| d.as_array());
+    for card in cards.into_iter().flatten() {
+        if let (Some(uuid), Some(art)) = (
+            card.get("uuid").and_then(|v| v.as_str()),
+            card.get("wideArt").and_then(|v| v.as_str()),
+        ) {
+            out.insert(uuid.to_string(), art.to_string());
+        }
+    }
+    out
+}
+
 async fn fetch_json(url: &str) -> Option<Value> {
     crate::http::pvp_client()
         .get(url)
@@ -173,12 +192,27 @@ pub async fn load_or_fetch(cache_dir: &Path) -> StaticData {
         }
     };
 
+    let cards_path = cache_dir.join("playercards.json");
+    let cards_json = match read_cached(&cards_path) {
+        Some(v) => v,
+        None => {
+            let v = fetch_json("https://valorant-api.com/v1/playercards")
+                .await
+                .unwrap_or_else(|| serde_json::json!({"data": []}));
+            if let Ok(text) = serde_json::to_string(&v) {
+                let _ = std::fs::write(&cards_path, text);
+            }
+            v
+        }
+    };
+
     StaticData {
         tiers: parse_tiers(&tiers_json),
         tier_icons: parse_tier_icons(&tiers_json),
         agents: parse_agents(&agents_json),
         agent_icons: parse_agent_icons(&agents_json),
         maps: parse_maps(&maps_json),
+        card_arts: parse_player_cards(&cards_json),
     }
 }
 

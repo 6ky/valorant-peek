@@ -178,6 +178,39 @@ pub async fn fetch_account_level(
     body.map(|v| parse_account_level(&v)).unwrap_or(0)
 }
 
+/// The signed-in user's equipped player card id, from their loadout.
+pub async fn fetch_loadout_card(
+    ctx: &AuthContext,
+    region: &Region,
+    version: &str,
+    puuid: &str,
+) -> String {
+    let url = format!(
+        "{}/personalization/v2/players/{}/playerloadout",
+        region.pd_base(),
+        puuid
+    );
+    let body: Option<Value> = async {
+        pvp_client()
+            .get(&url)
+            .headers(pvp_headers(ctx, version))
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()
+    }
+    .await;
+    body.and_then(|v| {
+        v.get("Identity")
+            .and_then(|i| i.get("PlayerCardID"))
+            .and_then(|c| c.as_str())
+            .map(String::from)
+    })
+    .unwrap_or_default()
+}
+
 pub fn parse_history(json: &Value, sd: &StaticData) -> Vec<HistoryEntry> {
     let matches = match json.get("Matches").and_then(|m| m.as_array()) {
         Some(arr) => arr,
@@ -242,9 +275,11 @@ pub async fn build_self(
     let puuids = [ctx.puuid.clone()];
     let names = fetch_names(ctx, region, version, &puuids).await;
     let level = fetch_account_level(ctx, region, version, &ctx.puuid).await;
+    let card_id = fetch_loadout_card(ctx, region, version, &ctx.puuid).await;
     Some(PlayerRow {
         puuid: ctx.puuid.clone(),
         name: names.get(&ctx.puuid).cloned().unwrap_or_default(),
+        player_card: sd.card_art(&card_id),
         agent: String::new(),
         agent_icon: String::new(),
         team: String::new(),
@@ -306,6 +341,7 @@ pub async fn build_rows(
         let mut row = PlayerRow {
             puuid: p.puuid.clone(),
             name,
+            player_card: sd.card_art(&p.player_card_id),
             agent: sd.agent_name(&p.character_id),
             agent_icon: sd.agent_icon(&p.character_id),
             team,
@@ -376,6 +412,7 @@ pub fn refresh_rows(
             };
             row.agent = sd.agent_name(&p.character_id);
             row.agent_icon = sd.agent_icon(&p.character_id);
+            row.player_card = sd.card_art(&p.player_card_id);
             if !(p.hide_level && !is_self) {
                 row.account_level = p.account_level;
             }

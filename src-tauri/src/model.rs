@@ -13,6 +13,7 @@ pub enum MatchState {
 pub struct PlayerRow {
     pub puuid: String,
     pub name: String,
+    pub player_card: String,
     pub agent: String,
     pub agent_icon: String,
     pub team: String,
