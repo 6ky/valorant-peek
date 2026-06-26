@@ -70,6 +70,7 @@ pub struct HistoryEntry {
 pub struct MatchView {
     pub state: MatchState,
     pub mode: String,
+    pub activity: String,
     pub players: Vec<PlayerRow>,
     pub me: Option<PlayerRow>,
     pub history: Vec<HistoryEntry>,

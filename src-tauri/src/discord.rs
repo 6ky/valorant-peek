@@ -1,4 +1,4 @@
-use crate::model::{MatchState, MatchView};
+use crate::model::MatchView;
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 
 /// The single shared "Peek" Discord application id, baked in so every user
@@ -127,16 +127,10 @@ fn self_rank(view: &MatchView) -> String {
 }
 
 fn activity_text(view: &MatchView) -> (String, String) {
-    let rank = self_rank(view);
-    let mode = if view.mode.is_empty() {
-        "match".to_string()
+    let details = if view.activity.is_empty() {
+        "Idle".to_string()
     } else {
-        view.mode.clone()
+        view.activity.clone()
     };
-    match view.state {
-        MatchState::CoreGame => (format!("In a {mode} match"), rank),
-        MatchState::PreGame => (format!("Agent Select - {mode}"), rank),
-        MatchState::Menu => ("In the menu".to_string(), rank),
-        MatchState::NoGame => ("Idle".to_string(), "Not in game".to_string()),
-    }
+    (details, self_rank(view))
 }

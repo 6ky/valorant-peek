@@ -145,6 +145,17 @@ body {
   animation: pulse 1.6s ease-in-out infinite;
 }
 
+.state-queue {
+  color: #f0a000;
+  border-color: #4a3700;
+}
+
+.state-queue .state-dot {
+  background: #f0a000;
+  box-shadow: 0 0 8px #f0a000;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
 @keyframes pulse {
   50% {
     opacity: 0.35;
