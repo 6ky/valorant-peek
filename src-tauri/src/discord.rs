@@ -13,9 +13,10 @@ pub fn resolve_app_id() -> String {
     }
 }
 
-// Drop and re-establish the connection every this many updates, so a Discord
-// restart that the IPC layer fails to surface as an error still recovers.
-const RECONNECT_EVERY: u32 = 5;
+// Re-send the presence every this many updates even when unchanged. This
+// keep-alive refreshes the activity and, if Discord has restarted, makes the
+// write fail so we notice the dropped connection and reconnect.
+const KEEPALIVE_EVERY: u32 = 10;
 
 pub struct Rpc {
     client: Option<DiscordIpcClient>,
@@ -57,23 +58,18 @@ impl Rpc {
     }
 
     pub fn update(&mut self, view: &MatchView) {
-        if !self.enabled() {
+        if !self.enabled() || !self.ensure_connected() {
             return;
         }
-        // Periodic self-heal: drop the connection so the reconnect below
-        // rebuilds it and re-applies the activity in this same tick.
         self.ticks = self.ticks.wrapping_add(1);
-        if self.ticks % RECONNECT_EVERY == 0 {
-            if let Some(mut client) = self.client.take() {
-                let _ = client.close();
-            }
-        }
-        if !self.ensure_connected() {
-            return;
-        }
+
         let (details, state) = activity_text(view);
         let key = format!("{details}|{state}");
-        if key == self.last_key {
+
+        // Send on change, plus a periodic keep-alive resend. The keep-alive
+        // refreshes the presence and surfaces a dropped connection as an error.
+        let keepalive = self.ticks % KEEPALIVE_EVERY == 0;
+        if key == self.last_key && !keepalive {
             return;
         }
 
@@ -95,8 +91,12 @@ impl Rpc {
 
         match result {
             Ok(_) => self.last_key = key,
-            // Connection likely dropped; reconnect on the next update.
-            Err(_) => self.client = None,
+            Err(_) => {
+                // Connection dropped; reconnect on the next update and force a
+                // resend by clearing the dedup key.
+                self.client = None;
+                self.last_key.clear();
+            }
         }
     }
 }
