@@ -18,19 +18,37 @@ const rows: PlayerRow[] = [
     rr: 42,
     peakRankName: "Radiant",
     peakRankTier: 27,
+    peakRankIcon: "",
     peakAct: "E7A3",
     winRate: 60,
     wins: 18,
     games: 30,
     leaderboard: 0,
     accountLevel: 120,
+    lastKills: 20,
+    lastDeaths: 14,
+    lastHs: 25,
+    hasCombat: true,
+    streak: 0,
+    rrTrend: 0,
+    smurfScore: 0,
+    partySize: 1,
+    encounters: 0,
+    encounterWins: 0,
+    encounterLosses: 0,
+    locked: true,
+    premiumSkins: false,
+    vandalSkin: "",
+    vandalImage: "",
+    vandalTierColor: "",
   },
 ];
 
 test("renders a player's name and rank", () => {
-  render(<PlayerTable players={rows} />);
-  expect(screen.getByText("Ace#NA1")).toBeInTheDocument();
-  expect(screen.getByText(/Immortal 3/)).toBeInTheDocument();
+  // The design splits "Name#Tag" into a name span and a dim tag span.
+  const { container } = render(<PlayerTable players={rows} state="CoreGame" />);
+  expect(container.querySelector(".pid .name")?.textContent).toBe("Ace#NA1");
+  expect(screen.getByText("Immortal 3")).toBeInTheDocument();
 });
 
 test("sorts higher rank first within a team", () => {
@@ -38,7 +56,7 @@ test("sorts higher rank first within a team", () => {
     { ...rows[0], puuid: "low", name: "Low#1", rankTier: 10, rankName: "Gold 1" },
     { ...rows[0], puuid: "high", name: "High#1", rankTier: 24, rankName: "Radiant" },
   ];
-  render(<PlayerTable players={two} />);
-  const names = screen.getAllByText(/#1/).map((el) => el.textContent);
+  const { container } = render(<PlayerTable players={two} state="CoreGame" />);
+  const names = Array.from(container.querySelectorAll(".pid .name")).map((el) => el.textContent);
   expect(names[0]).toBe("High#1");
 });

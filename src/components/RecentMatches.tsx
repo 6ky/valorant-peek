@@ -1,106 +1,103 @@
-import { useState } from "react";
 import { HistoryEntry } from "../types";
-import { tierColor } from "../rank";
+import { divColor, kdOf } from "../design";
 
-const MAX = 6;
+const MAX = 9;
+
+function dropImg(e: React.SyntheticEvent<HTMLImageElement>) {
+  e.currentTarget.remove();
+}
+
+function MapThumb({ map, image }: { map: string; image: string }) {
+  const ab = (map || "MAP").slice(0, 3).toUpperCase();
+  return (
+    <span className="mthumb">
+      <span className="ab">{ab}</span>
+      {image && <img src={image} alt="" onError={dropImg} />}
+    </span>
+  );
+}
 
 export function RecentMatches({ history }: { history: HistoryEntry[] }) {
-  const [open, setOpen] = useState<number | null>(null);
   if (history.length === 0) return null;
 
   const shown = history.slice(0, MAX);
-  const net = shown.reduce((sum, h) => sum + h.rrChange, 0);
+  let wins = 0;
+  let losses = 0;
+  let net = 0;
+  for (const h of shown) {
+    const won = h.hasStats ? h.won : h.rrChange >= 0;
+    won ? wins++ : losses++;
+    net += h.rrChange;
+  }
+  // Form dots read oldest -> newest, left to right.
+  const form = [...shown].reverse();
 
   return (
     <div className="matches">
-      <div className="matches-head">
-        <span>Recent Competitive</span>
-        <span className="matches-net">
-          net{" "}
-          <span className={net >= 0 ? "pos" : "neg"}>
-            {net >= 0 ? "+" : ""}
-            {net} RR
-          </span>
+      <div className="mhdr">
+        <h3>Recent Competitive</h3>
+        <span className="sm">
+          <span className="gp">{wins}W</span> <span className="lp">{losses}L</span> &middot;{" "}
+          {net > 0 ? "+" : ""}
+          {net} RR
         </span>
+        <div className="form">
+          {form.map((h, i) => {
+            const won = h.hasStats ? h.won : h.rrChange >= 0;
+            return <i key={i} className={won ? "w" : "l"} />;
+          })}
+        </div>
       </div>
-      <div className="match-list">
+
+      <div className="mlist">
         {shown.map((h, i) => {
           const won = h.hasStats ? h.won : h.rrChange >= 0;
-          const expanded = open === i;
-          const kd = h.deaths > 0 ? (h.kills / h.deaths).toFixed(2) : h.kills.toFixed(2);
+          const kd = kdOf(h.kills, h.deaths);
           return (
-            <div key={i} className={`match-row ${won ? "win" : "loss"} ${expanded ? "open" : ""}`}>
-              <button className="match-main" onClick={() => setOpen(expanded ? null : i)}>
-                <span className="match-result">{won ? "W" : "L"}</span>
-                {h.agentIcon ? (
-                  <img className="match-agent" src={h.agentIcon} alt="" />
-                ) : (
-                  <span className="match-agent empty" />
-                )}
-                <span className="match-map">{h.map || "Match"}</span>
-                {h.hasStats && (
-                  <span className="match-kda">
-                    {h.kills}
-                    <span className="slash">/</span>
-                    {h.deaths}
-                    <span className="slash">/</span>
-                    {h.assists}
-                  </span>
-                )}
-                <span className={`match-rr ${h.rrChange >= 0 ? "pos" : "neg"}`}>
-                  {h.rrChange >= 0 ? "+" : ""}
-                  {h.rrChange}
-                </span>
-              </button>
-              {expanded && (
-                <div className="match-detail">
-                  {h.hasStats && (
-                    <div className="md-summary">
-                      <span>
-                        <b>
-                          {h.selfRounds}-{h.enemyRounds}
-                        </b>{" "}
-                        score
-                      </span>
-                      <span>
-                        <b>{kd}</b> K/D
-                      </span>
-                      <span>
-                        <b>{h.acs}</b> ACS
-                      </span>
-                      <span style={{ color: tierColor(h.tier) }}>{h.rankName}</span>
-                    </div>
-                  )}
-                  {h.scoreboard.length > 0 && (
-                    <div className="scoreboard">
-                      {h.scoreboard.map((p, j) => {
-                        const divider = j > 0 && h.scoreboard[j - 1].ally !== p.ally;
-                        return (
-                          <div key={j}>
-                            {divider && <div className="sb-divider" />}
-                            <div
-                              className={`sb-row ${p.ally ? "ally" : "enemy"} ${
-                                p.isSelf ? "self" : ""
-                              }`}
-                            >
-                              {p.agentIcon ? (
-                                <img className="sb-agent" src={p.agentIcon} alt="" />
-                              ) : (
-                                <span className="sb-agent empty" />
-                              )}
-                              <span className="sb-name">{p.name || "Hidden"}</span>
-                              <span className="sb-kda">
-                                {p.kills}/{p.deaths}/{p.assists}
-                              </span>
-                              <span className="sb-acs">{p.acs}</span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+            <div key={i} className={`mrow ${won ? "win" : "loss"}`} style={{ animationDelay: `${i * 42}ms` }}>
+              <div className="acc" />
+              <div className="cell">
+                <MapThumb map={h.map} image={h.mapImage} />
+              </div>
+              <div className="cell">
+                <div className="mp">{h.map || "Match"}</div>
+                {/* TODO: per-match mode and timestamp are not in history; show
+                    the rank at the time instead. */}
+                <div className="mt" style={{ color: divColor(h.tier) }}>
+                  {h.rankName || "Competitive"}
                 </div>
-              )}
+              </div>
+              <div className="cell">
+                <div className="res">{won ? "WIN" : "LOSS"}</div>
+                {h.hasStats && (
+                  <div className="sc">
+                    {h.selfRounds}-{h.enemyRounds}
+                  </div>
+                )}
+              </div>
+              <div className="cell">
+                <span className="agent">
+                  {h.agentIcon && <img src={h.agentIcon} alt="" onError={(e) => e.currentTarget.remove()} />}
+                </span>
+              </div>
+              <div className="cell">
+                {h.hasStats ? (
+                  <div className="kda">
+                    {h.kills}
+                    <span className="s">/</span>
+                    {h.deaths}
+                    <span className="s">/</span>
+                    {h.assists}
+                    <span className="small">{h.hs}% HS &middot; {kd.toFixed(2)} KD</span>
+                  </div>
+                ) : (
+                  <div className="kda faint">&middot;</div>
+                )}
+              </div>
+              <div className="cell rrc">
+                {h.rrChange > 0 ? "+" : ""}
+                {h.rrChange}
+              </div>
             </div>
           );
         })}
