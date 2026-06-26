@@ -106,6 +106,11 @@ export function Settings({ onClose }: { onClose: () => void }) {
             <Toggle on={combat} onChange={changeCombat} />
           </div>
         </div>
+
+        <div className="settings-note">
+          Peek is not affiliated with or endorsed by Riot Games. VALORANT is a trademark of Riot
+          Games, Inc.
+        </div>
       </div>
     </div>
   );

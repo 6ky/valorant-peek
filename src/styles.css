@@ -1508,6 +1508,14 @@ body {
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
+.settings-note {
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid var(--line);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--faint);
+}
 .settings-head {
   display: flex;
   align-items: center;
