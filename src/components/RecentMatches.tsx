@@ -55,7 +55,7 @@ export function RecentMatches({ history }: { history: HistoryEntry[] }) {
               {expanded && (
                 <div className="match-detail">
                   {h.hasStats && (
-                    <>
+                    <div className="md-summary">
                       <span>
                         <b>
                           {h.selfRounds}-{h.enemyRounds}
@@ -68,9 +68,37 @@ export function RecentMatches({ history }: { history: HistoryEntry[] }) {
                       <span>
                         <b>{h.acs}</b> ACS
                       </span>
-                    </>
+                      <span style={{ color: tierColor(h.tier) }}>{h.rankName}</span>
+                    </div>
                   )}
-                  <span style={{ color: tierColor(h.tier) }}>{h.rankName}</span>
+                  {h.scoreboard.length > 0 && (
+                    <div className="scoreboard">
+                      {h.scoreboard.map((p, j) => {
+                        const divider = j > 0 && h.scoreboard[j - 1].ally !== p.ally;
+                        return (
+                          <div key={j}>
+                            {divider && <div className="sb-divider" />}
+                            <div
+                              className={`sb-row ${p.ally ? "ally" : "enemy"} ${
+                                p.isSelf ? "self" : ""
+                              }`}
+                            >
+                              {p.agentIcon ? (
+                                <img className="sb-agent" src={p.agentIcon} alt="" />
+                              ) : (
+                                <span className="sb-agent empty" />
+                              )}
+                              <span className="sb-name">{p.name || "Hidden"}</span>
+                              <span className="sb-kda">
+                                {p.kills}/{p.deaths}/{p.assists}
+                              </span>
+                              <span className="sb-acs">{p.acs}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

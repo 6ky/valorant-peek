@@ -23,6 +23,17 @@ export interface PlayerRow {
   accountLevel: number;
 }
 
+export interface ScoreEntry {
+  name: string;
+  agentIcon: string;
+  kills: number;
+  deaths: number;
+  assists: number;
+  acs: number;
+  ally: boolean;
+  isSelf: boolean;
+}
+
 export interface HistoryEntry {
   map: string;
   rrChange: number;
@@ -37,6 +48,7 @@ export interface HistoryEntry {
   enemyRounds: number;
   won: boolean;
   hasStats: boolean;
+  scoreboard: ScoreEntry[];
 }
 
 export interface MatchView {

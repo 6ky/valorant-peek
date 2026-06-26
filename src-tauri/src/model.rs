@@ -35,6 +35,19 @@ pub struct PlayerRow {
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct ScoreEntry {
+    pub name: String,
+    pub agent_icon: String,
+    pub kills: u32,
+    pub deaths: u32,
+    pub assists: u32,
+    pub acs: u32,
+    pub ally: bool,
+    pub is_self: bool,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct HistoryEntry {
     pub map: String,
     pub rr_change: i32,
@@ -49,6 +62,7 @@ pub struct HistoryEntry {
     pub enemy_rounds: u32,
     pub won: bool,
     pub has_stats: bool,
+    pub scoreboard: Vec<ScoreEntry>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]

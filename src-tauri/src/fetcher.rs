@@ -2,7 +2,7 @@ use crate::auth::{pvp_headers, AuthContext};
 use crate::client_version::Region;
 use crate::http::pvp_client;
 use crate::match_state::RawPlayer;
-use crate::model::{HistoryEntry, PlayerRow};
+use crate::model::{HistoryEntry, PlayerRow, ScoreEntry};
 use crate::static_cache::StaticData;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -255,6 +255,7 @@ pub struct MatchStats {
     pub enemy_rounds: u32,
     pub won: bool,
     pub agent_icon: String,
+    pub scoreboard: Vec<ScoreEntry>,
 }
 
 pub fn parse_match_stats(detail: &Value, puuid: &str, sd: &StaticData) -> MatchStats {
@@ -292,6 +293,40 @@ pub fn parse_match_stats(detail: &Value, puuid: &str, sd: &StaticData) -> MatchS
         }
     }
 
+    // Full scoreboard for every player, from the same response.
+    let mut scoreboard = Vec::new();
+    if let Some(arr) = players {
+        for p in arr {
+            let subject = p.get("subject").and_then(|v| v.as_str()).unwrap_or("");
+            let team = p.get("teamId").and_then(|v| v.as_str()).unwrap_or("");
+            let agent = p.get("characterId").and_then(|v| v.as_str()).unwrap_or("");
+            let g = |k: &str| {
+                p.get("stats")
+                    .and_then(|s| s.get(k))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32
+            };
+            let rp = g("roundsPlayed").max(1);
+            let game_name = p.get("gameName").and_then(|v| v.as_str()).unwrap_or("");
+            let tag = p.get("tagLine").and_then(|v| v.as_str()).unwrap_or("");
+            scoreboard.push(ScoreEntry {
+                name: if game_name.is_empty() {
+                    String::new()
+                } else {
+                    format!("{game_name}#{tag}")
+                },
+                agent_icon: sd.agent_icon(agent),
+                kills: g("kills"),
+                deaths: g("deaths"),
+                assists: g("assists"),
+                acs: g("score") / rp,
+                ally: team == team_id,
+                is_self: subject == puuid,
+            });
+        }
+        scoreboard.sort_by(|a, b| b.ally.cmp(&a.ally).then(b.acs.cmp(&a.acs)));
+    }
+
     MatchStats {
         kills: stat("kills"),
         deaths: stat("deaths"),
@@ -301,6 +336,7 @@ pub fn parse_match_stats(detail: &Value, puuid: &str, sd: &StaticData) -> MatchS
         enemy_rounds,
         won,
         agent_icon: sd.agent_icon(character_id),
+        scoreboard,
     }
 }
 
@@ -389,6 +425,7 @@ pub async fn fetch_history(
             entry.self_rounds = s.self_rounds;
             entry.enemy_rounds = s.enemy_rounds;
             entry.won = s.won;
+            entry.scoreboard = s.scoreboard;
             entry.has_stats = true;
         }
     }
