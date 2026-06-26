@@ -1,7 +1,8 @@
 use crate::auth::fetch_auth;
 use crate::client_version::{detect_region_from_log, fetch_client_version, Region};
 use crate::discord::{resolve_app_id, Rpc};
-use crate::fetcher::{build_rows, build_self, fetch_history, refresh_rows};
+use crate::fetcher::{build_rows, build_self, fetch_history, refresh_rows, MatchStats};
+use std::collections::HashMap;
 use crate::lockfile::read_lockfile;
 use crate::match_state::current_state;
 use crate::model::{MatchState, MatchView, PlayerRow};
@@ -51,6 +52,7 @@ async fn poll_once(
     last: &MatchView,
     last_match_id: &mut Option<String>,
     self_tick: &mut u32,
+    match_cache: &mut HashMap<String, MatchStats>,
 ) -> Option<MatchView> {
     let lf = match read_lockfile() {
         Ok(lf) => lf,
@@ -75,7 +77,7 @@ async fn poll_once(
         last.me.clone()
     };
     let history = if refresh_self {
-        let fresh = fetch_history(&ctx, region, &v, sd).await;
+        let fresh = fetch_history(&ctx, region, &v, sd, match_cache).await;
         if fresh.is_empty() {
             last.history.clone()
         } else {
@@ -146,6 +148,7 @@ pub async fn run_loop(app: AppHandle, rpc_enabled: Arc<AtomicBool>) {
     let mut rpc = Rpc::new(resolve_app_id(), start);
     let mut last_match_id: Option<String> = None;
     let mut self_tick = 0u32;
+    let mut match_cache: HashMap<String, MatchStats> = HashMap::new();
 
     loop {
         let view = match poll_once(
@@ -155,6 +158,7 @@ pub async fn run_loop(app: AppHandle, rpc_enabled: Arc<AtomicBool>) {
             &last,
             &mut last_match_id,
             &mut self_tick,
+            &mut match_cache,
         )
         .await
         {

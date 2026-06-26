@@ -18,6 +18,7 @@ const rows: PlayerRow[] = [
     rr: 42,
     peakRankName: "Radiant",
     peakRankTier: 27,
+    peakAct: "E7A3",
     winRate: 60,
     wins: 18,
     games: 30,
