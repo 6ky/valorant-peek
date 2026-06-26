@@ -25,8 +25,8 @@ function ColumnHeader() {
       <span />
       <span />
       <span>Player</span>
-      <span>Rank</span>
       <span>Vandal</span>
+      <span>Rank</span>
       <span className="r">RR</span>
       <span className="r">K/D</span>
       <span className="r">HS%</span>

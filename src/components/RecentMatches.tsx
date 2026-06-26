@@ -1,7 +1,7 @@
 import { HistoryEntry } from "../types";
 import { divColor, kdOf } from "../design";
 
-const MAX = 9;
+const MAX = 15;
 
 function dropImg(e: React.SyntheticEvent<HTMLImageElement>) {
   e.currentTarget.remove();

@@ -49,8 +49,10 @@ export interface AgentMeta {
 export function agentMeta(name: string): AgentMeta {
   const m = AGENTS[name];
   if (m) return { role: m[0], mono: m[1], color: ROLE[m[0]] };
-  // Unknown agent: derive a 2-letter monogram from the name.
-  const mono = (name || "").replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "??";
+  // Unknown agent: derive a 2-letter monogram from the name. An empty name
+  // (not yet picked, or practice range, which the API does not report) shows a
+  // blank tile rather than a "??" placeholder.
+  const mono = (name || "").replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase();
   return { role: "duelist", mono, color: ROLE.duelist };
 }
 

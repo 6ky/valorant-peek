@@ -32,6 +32,8 @@ export function MatchScreen({ view }: { view: MatchView }) {
 
   const showScore = view.allyScore > 0 || view.enemyScore > 0;
   const showClock = pregame && remaining > 0;
+  const total = view.players.length;
+  const loaded = view.players.filter((p) => p.hasCombat).length;
 
   return (
     <div className="view on">
@@ -52,6 +54,12 @@ export function MatchScreen({ view }: { view: MatchView }) {
           </div>
         )}
         {showClock && <span className="phase mono">{fmtTime(remaining)}</span>}
+        {view.combatLoading && total > 0 && (
+          <span className="ctx-loading mono">
+            <span className="ctx-loading-dot" />
+            loading stats {loaded}/{total}
+          </span>
+        )}
       </div>
       <PlayerTable players={view.players} state={view.state} />
     </div>

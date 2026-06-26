@@ -28,6 +28,8 @@ export interface PlayerRow {
   hasCombat: boolean;
   streak: number;
   rrTrend: number;
+  recentWins: number;
+  recentLosses: number;
   smurfScore: number;
   partySize: number;
   encounters: number;
@@ -85,4 +87,5 @@ export interface MatchView {
   mapImage: string;
   allyScore: number;
   enemyScore: number;
+  combatLoading: boolean;
 }
