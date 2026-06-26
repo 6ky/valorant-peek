@@ -6,6 +6,7 @@ const rows: PlayerRow[] = [
   {
     puuid: "p1",
     name: "Ace#NA1",
+    playerCard: "",
     agent: "Jett",
     agentIcon: "",
     team: "Blue",

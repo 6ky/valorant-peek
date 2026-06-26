@@ -3,6 +3,7 @@ export type MatchState = "NoGame" | "Menu" | "PreGame" | "CoreGame";
 export interface PlayerRow {
   puuid: string;
   name: string;
+  playerCard: string;
   agent: string;
   agentIcon: string;
   team: string;

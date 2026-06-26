@@ -8,6 +8,9 @@ export function ProfileCard({ me }: { me: PlayerRow }) {
 
   return (
     <div className="profile">
+      {me.playerCard && (
+        <div className="profile-banner" style={{ backgroundImage: `url(${me.playerCard})` }} />
+      )}
       <div className="profile-head">
         <span className="profile-name">{me.name || "You"}</span>
         {me.accountLevel > 0 && <span className="profile-level">Level {me.accountLevel}</span>}
