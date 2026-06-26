@@ -506,6 +506,109 @@ body {
   background: #e23b49;
 }
 
+/* Settings */
+.modal.settings {
+  width: 330px;
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.setting {
+  padding: 13px 0;
+  border-top: 1px solid var(--line);
+}
+
+.setting:first-of-type {
+  border-top: none;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.setting-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.setting-desc {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.seg {
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;
+  background: #14171e;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.seg-btn {
+  flex: 1;
+  padding: 7px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.seg-btn:hover {
+  color: var(--text);
+}
+
+.seg-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.toggle {
+  flex-shrink: 0;
+  width: 40px;
+  height: 23px;
+  border-radius: 999px;
+  background: #2a2f3a;
+  border: none;
+  padding: 0;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.16s ease;
+}
+
+.toggle.on {
+  background: var(--accent);
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.16s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.toggle.on .toggle-knob {
+  transform: translateX(17px);
+}
+
 /* Animations */
 @keyframes appIn {
   from {

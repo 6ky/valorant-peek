@@ -17,6 +17,8 @@ pub fn resolve_app_id() -> String {
 // keep-alive refreshes the activity and, if Discord has restarted, makes the
 // write fail so we notice the dropped connection and reconnect.
 const KEEPALIVE_EVERY: u32 = 10;
+// Sentinel dedup key used while presence is turned off in settings.
+const OFF_KEY: &str = "__rpc_off__";
 
 pub struct Rpc {
     client: Option<DiscordIpcClient>,
@@ -37,7 +39,7 @@ impl Rpc {
         }
     }
 
-    pub fn enabled(&self) -> bool {
+    pub fn has_app_id(&self) -> bool {
         !self.app_id.is_empty()
     }
 
@@ -57,8 +59,23 @@ impl Rpc {
         false
     }
 
-    pub fn update(&mut self, view: &MatchView) {
-        if !self.enabled() || !self.ensure_connected() {
+    pub fn update(&mut self, view: &MatchView, enabled: bool) {
+        if !self.has_app_id() {
+            return;
+        }
+        if !enabled {
+            // Clear the presence once when turned off in settings.
+            if self.last_key != OFF_KEY {
+                if self.ensure_connected() {
+                    if let Some(client) = self.client.as_mut() {
+                        let _ = client.clear_activity();
+                    }
+                }
+                self.last_key = OFF_KEY.to_string();
+            }
+            return;
+        }
+        if !self.ensure_connected() {
             return;
         }
         self.ticks = self.ticks.wrapping_add(1);

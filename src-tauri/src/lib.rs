@@ -10,9 +10,20 @@ mod orchestrator;
 mod presence;
 mod static_cache;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
+
+struct AppState {
+    rpc_enabled: Arc<AtomicBool>,
+}
+
+#[tauri::command]
+fn set_rpc_enabled(state: tauri::State<AppState>, enabled: bool) {
+    state.rpc_enabled.store(enabled, Ordering::Relaxed);
+}
 
 fn show_main(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -52,11 +63,16 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let rpc_enabled = Arc::new(AtomicBool::new(true));
+    let loop_flag = rpc_enabled.clone();
+
     tauri::Builder::default()
-        .setup(|app| {
+        .manage(AppState { rpc_enabled })
+        .invoke_handler(tauri::generate_handler![set_rpc_enabled])
+        .setup(move |app| {
             build_tray(app)?;
             let handle = app.handle().clone();
-            tauri::async_runtime::spawn(orchestrator::run_loop(handle));
+            tauri::async_runtime::spawn(orchestrator::run_loop(handle, loop_flag));
             Ok(())
         })
         .run(tauri::generate_context!())

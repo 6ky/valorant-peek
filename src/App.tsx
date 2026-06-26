@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { MatchView, MatchState } from "./types";
 import { StatusScreen } from "./components/StatusScreen";
 import { PlayerTable } from "./components/PlayerTable";
 import { ProfileCard } from "./components/ProfileCard";
 import { HistoryStrip } from "./components/HistoryStrip";
 import { CloseDialog } from "./components/CloseDialog";
+import { Settings } from "./components/Settings";
 
 const CLOSE_PREF_KEY = "peek.closeAction";
 
@@ -30,7 +32,16 @@ export default function App() {
   const [view, setView] = useState<MatchView>(INITIAL);
   const [askClose, setAskClose] = useState(false);
   const [exiting, setExiting] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const win = getCurrentWindow();
+
+  // Apply persisted settings on startup.
+  useEffect(() => {
+    win.setAlwaysOnTop(localStorage.getItem("peek.alwaysOnTop") !== "false");
+    invoke("set_rpc_enabled", {
+      enabled: localStorage.getItem("peek.rpcEnabled") !== "false",
+    });
+  }, []);
 
   function performExit(action: "tray" | "quit") {
     setExiting(true);
@@ -83,6 +94,14 @@ export default function App() {
         <span className="win-controls">
           <button
             className="win-btn"
+            onClick={() => setShowSettings(true)}
+            aria-label="Settings"
+            title="Settings"
+          >
+            &#x2699;
+          </button>
+          <button
+            className="win-btn"
             onClick={() => win.minimize()}
             aria-label="Minimize"
             title="Minimize"
@@ -117,6 +136,7 @@ export default function App() {
           onCancel={() => setAskClose(false)}
         />
       )}
+      {showSettings && <Settings onClose={() => setShowSettings(false)} />}
     </div>
   );
 }
