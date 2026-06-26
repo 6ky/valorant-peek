@@ -14,6 +14,9 @@ pub struct RawPlayer {
     pub incognito: bool,
     pub hide_level: bool,
     pub player_card_id: String,
+    // Agent select only: true once the player has locked their agent. Absent
+    // in coregame, where it defaults to false.
+    pub locked: bool,
 }
 
 pub fn parse_match_players(json: &Value) -> Vec<RawPlayer> {
@@ -53,6 +56,7 @@ pub fn parse_match_players(json: &Value) -> Vec<RawPlayer> {
                 incognito: id_bool("Incognito"),
                 hide_level: id_bool("HideAccountLevel"),
                 player_card_id: id_str("PlayerCardID"),
+                locked: s("CharacterSelectionState") == "locked",
             }
         })
         .collect()
@@ -67,42 +71,68 @@ async fn match_id(client: &reqwest::Client, url: &str, headers: &reqwest::header
     v.get("MatchID").and_then(|m| m.as_str()).map(String::from)
 }
 
-async fn players_for(client: &reqwest::Client, url: &str, headers: &reqwest::header::HeaderMap, key: Option<&str>) -> Vec<RawPlayer> {
-    let body: Option<Value> = async {
-        let resp = client.get(url).headers(headers.clone()).send().await.ok()?;
-        resp.json().await.ok()
-    }
-    .await;
-    match (body, key) {
-        (Some(v), Some(k)) => v.get(k).map(parse_match_players).unwrap_or_default(),
-        (Some(v), None) => parse_match_players(&v),
-        _ => Vec::new(),
-    }
+async fn fetch_doc(client: &reqwest::Client, url: &str, headers: &reqwest::header::HeaderMap) -> Option<Value> {
+    let resp = client.get(url).headers(headers.clone()).send().await.ok()?;
+    resp.json().await.ok()
 }
 
-pub async fn current_state(
-    ctx: &AuthContext,
-    region: &Region,
-    version: &str,
-) -> (MatchState, Option<String>, Vec<RawPlayer>) {
+/// Snapshot of the local player's current match phase.
+pub struct CurrentState {
+    pub state: MatchState,
+    pub match_id: Option<String>,
+    pub players: Vec<RawPlayer>,
+    // Seconds left in the agent select countdown, 0 outside of pregame.
+    pub phase_time: u32,
+}
+
+pub async fn current_state(ctx: &AuthContext, region: &Region, version: &str) -> CurrentState {
     let client = pvp_client();
     let headers = pvp_headers(ctx, version);
 
     let cg_player = format!("{}/core-game/v1/players/{}", region.glz_base(), ctx.puuid);
     if let Some(mid) = match_id(&client, &cg_player, &headers).await {
         let murl = format!("{}/core-game/v1/matches/{}", region.glz_base(), mid);
-        let players = players_for(&client, &murl, &headers, None).await;
-        return (MatchState::CoreGame, Some(mid), players);
+        let players = fetch_doc(&client, &murl, &headers)
+            .await
+            .map(|v| parse_match_players(&v))
+            .unwrap_or_default();
+        return CurrentState {
+            state: MatchState::CoreGame,
+            match_id: Some(mid),
+            players,
+            phase_time: 0,
+        };
     }
 
     let pg_player = format!("{}/pregame/v1/players/{}", region.glz_base(), ctx.puuid);
     if let Some(mid) = match_id(&client, &pg_player, &headers).await {
         let murl = format!("{}/pregame/v1/matches/{}", region.glz_base(), mid);
-        let players = players_for(&client, &murl, &headers, Some("AllyTeam")).await;
-        return (MatchState::PreGame, Some(mid), players);
+        let doc = fetch_doc(&client, &murl, &headers).await;
+        let players = doc
+            .as_ref()
+            .and_then(|v| v.get("AllyTeam"))
+            .map(parse_match_players)
+            .unwrap_or_default();
+        let phase_time = doc
+            .as_ref()
+            .and_then(|v| v.get("PhaseTimeRemainingNS"))
+            .and_then(|v| v.as_u64())
+            .map(|ns| (ns / 1_000_000_000) as u32)
+            .unwrap_or(0);
+        return CurrentState {
+            state: MatchState::PreGame,
+            match_id: Some(mid),
+            players,
+            phase_time,
+        };
     }
 
-    (MatchState::Menu, None, Vec::new())
+    CurrentState {
+        state: MatchState::Menu,
+        match_id: None,
+        players: Vec::new(),
+        phase_time: 0,
+    }
 }
 
 #[cfg(test)]
@@ -127,6 +157,23 @@ mod tests {
         assert_eq!(players[1].team, "Red");
         assert_eq!(players[1].party_id, "");
         assert_eq!(players[1].account_level, 0);
+        assert!(!players[0].locked);
+    }
+
+    #[test]
+    fn reads_pregame_lock_state() {
+        let v: Value = serde_json::from_str(
+            r#"{"Players":[
+                {"Subject":"p1","CharacterID":"x","CharacterSelectionState":"locked"},
+                {"Subject":"p2","CharacterID":"","CharacterSelectionState":"selected"},
+                {"Subject":"p3"}
+            ]}"#,
+        )
+        .unwrap();
+        let players = parse_match_players(&v);
+        assert!(players[0].locked);
+        assert!(!players[1].locked);
+        assert!(!players[2].locked);
     }
 
     #[test]
