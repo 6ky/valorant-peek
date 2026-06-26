@@ -100,6 +100,6 @@ fn activity_text(view: &MatchView) -> (String, String) {
         MatchState::CoreGame => (format!("In a {mode} match"), rank),
         MatchState::PreGame => (format!("Agent Select - {mode}"), rank),
         MatchState::Menu => ("In the menu".to_string(), rank),
-        MatchState::NoGame => (String::new(), String::new()),
+        MatchState::NoGame => ("Idle".to_string(), "Not in game".to_string()),
     }
 }
