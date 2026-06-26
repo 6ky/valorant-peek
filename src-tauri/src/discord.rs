@@ -1,6 +1,18 @@
 use crate::model::{MatchState, MatchView};
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 
+/// The single shared "Peek" Discord application id, baked in so every user
+/// gets the same branding and logo without registering their own app. Devs can
+/// override it with the PEEK_DISCORD_APP_ID environment variable.
+const DEFAULT_APP_ID: &str = "1519865652763033752";
+
+pub fn resolve_app_id() -> String {
+    match std::env::var("PEEK_DISCORD_APP_ID") {
+        Ok(id) if !id.is_empty() => id,
+        _ => DEFAULT_APP_ID.to_string(),
+    }
+}
+
 pub struct Rpc {
     client: Option<DiscordIpcClient>,
     app_id: String,
