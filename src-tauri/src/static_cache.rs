@@ -10,6 +10,7 @@ pub struct StaticData {
     pub agent_icons: HashMap<String, String>,
     pub maps: HashMap<String, String>,
     pub card_arts: HashMap<String, String>,
+    pub season_labels: HashMap<String, String>,
 }
 
 impl StaticData {
@@ -38,6 +39,10 @@ impl StaticData {
 
     pub fn card_art(&self, id: &str) -> String {
         self.card_arts.get(id).cloned().unwrap_or_default()
+    }
+
+    pub fn season_label(&self, uuid: &str) -> String {
+        self.season_labels.get(uuid).cloned().unwrap_or_default()
     }
 }
 
@@ -131,6 +136,71 @@ pub fn parse_player_cards(json: &Value) -> HashMap<String, String> {
     out
 }
 
+fn extract_num(name: &str) -> Option<u32> {
+    let last = name.split_whitespace().last()?;
+    if let Ok(n) = last.parse::<u32>() {
+        return Some(n);
+    }
+    match last.to_uppercase().as_str() {
+        "I" => Some(1),
+        "II" => Some(2),
+        "III" => Some(3),
+        "IV" => Some(4),
+        "V" => Some(5),
+        "VI" => Some(6),
+        "VII" => Some(7),
+        _ => None,
+    }
+}
+
+/// Short label for a parent season: "E8" for "EPISODE 8", or "V26" for the
+/// newer version-based seasons.
+fn parent_label(name: &str) -> Option<String> {
+    let t = name.trim();
+    if t.to_uppercase().contains("EPISODE") {
+        return extract_num(t).map(|n| format!("E{n}"));
+    }
+    if t.len() >= 2 && t.starts_with('V') && t[1..].chars().all(|c| c.is_ascii_digit()) {
+        return Some(t.to_string());
+    }
+    None
+}
+
+/// Map each competitive act uuid to a short label like "E8A2" or "V26A4".
+pub fn parse_seasons(json: &Value) -> HashMap<String, String> {
+    let arr = match json.get("data").and_then(|d| d.as_array()) {
+        Some(a) => a,
+        None => return HashMap::new(),
+    };
+
+    // Top-level seasons (parentUuid null) are episodes or version seasons.
+    let mut parents: HashMap<String, String> = HashMap::new();
+    for s in arr {
+        if s.get("parentUuid").and_then(|v| v.as_str()).is_none() {
+            let name = s.get("displayName").and_then(|v| v.as_str()).unwrap_or("");
+            let uuid = s.get("uuid").and_then(|v| v.as_str()).unwrap_or("");
+            if let Some(label) = parent_label(name) {
+                if !uuid.is_empty() {
+                    parents.insert(uuid.to_string(), label);
+                }
+            }
+        }
+    }
+
+    let mut out = HashMap::new();
+    for s in arr {
+        let name = s.get("displayName").and_then(|v| v.as_str()).unwrap_or("");
+        let uuid = s.get("uuid").and_then(|v| v.as_str()).unwrap_or("");
+        let parent = s.get("parentUuid").and_then(|v| v.as_str()).unwrap_or("");
+        if name.to_uppercase().contains("ACT") {
+            if let (Some(act), Some(label)) = (extract_num(name), parents.get(parent)) {
+                out.insert(uuid.to_string(), format!("{label}A{act}"));
+            }
+        }
+    }
+    out
+}
+
 async fn fetch_json(url: &str) -> Option<Value> {
     crate::http::pvp_client()
         .get(url)
@@ -206,6 +276,20 @@ pub async fn load_or_fetch(cache_dir: &Path) -> StaticData {
         }
     };
 
+    let seasons_path = cache_dir.join("seasons.json");
+    let seasons_json = match read_cached(&seasons_path) {
+        Some(v) => v,
+        None => {
+            let v = fetch_json("https://valorant-api.com/v1/seasons")
+                .await
+                .unwrap_or_else(|| serde_json::json!({"data": []}));
+            if let Ok(text) = serde_json::to_string(&v) {
+                let _ = std::fs::write(&seasons_path, text);
+            }
+            v
+        }
+    };
+
     StaticData {
         tiers: parse_tiers(&tiers_json),
         tier_icons: parse_tier_icons(&tiers_json),
@@ -213,6 +297,7 @@ pub async fn load_or_fetch(cache_dir: &Path) -> StaticData {
         agent_icons: parse_agent_icons(&agents_json),
         maps: parse_maps(&maps_json),
         card_arts: parse_player_cards(&cards_json),
+        season_labels: parse_seasons(&seasons_json),
     }
 }
 
@@ -239,6 +324,22 @@ mod tests {
         assert_eq!(sd.rank_name(999), "Unranked");
         assert_eq!(sd.agent_name("abc"), "Jett");
         assert_eq!(sd.agent_name("missing"), "");
+    }
+
+    #[test]
+    fn seasons_map_old_and_new_naming() {
+        let v: Value = serde_json::from_str(
+            r#"{"data":[
+                {"uuid":"ep8","displayName":"EPISODE 8","parentUuid":null},
+                {"uuid":"act-a","displayName":"ACT II","parentUuid":"ep8"},
+                {"uuid":"v26","displayName":"V26","parentUuid":null},
+                {"uuid":"act-b","displayName":"ACT IV","parentUuid":"v26"}
+            ]}"#,
+        )
+        .unwrap();
+        let m = parse_seasons(&v);
+        assert_eq!(m.get("act-a").unwrap(), "E8A2");
+        assert_eq!(m.get("act-b").unwrap(), "V26A4");
     }
 
     #[test]

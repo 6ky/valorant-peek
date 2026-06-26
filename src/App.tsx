@@ -6,7 +6,7 @@ import { MatchView, MatchState } from "./types";
 import { StatusScreen } from "./components/StatusScreen";
 import { PlayerTable } from "./components/PlayerTable";
 import { ProfileCard } from "./components/ProfileCard";
-import { HistoryStrip } from "./components/HistoryStrip";
+import { RecentMatches } from "./components/RecentMatches";
 import { CloseDialog } from "./components/CloseDialog";
 import { Settings } from "./components/Settings";
 
@@ -123,9 +123,11 @@ export default function App() {
           <PlayerTable players={view.players} />
         ) : (
           <div className="idle">
-            {view.me && <ProfileCard me={view.me} />}
-            <HistoryStrip history={view.history} />
-            <StatusScreen state={view.state} />
+            <div className="idle-inner">
+              {view.me && <ProfileCard me={view.me} />}
+              <RecentMatches history={view.history} />
+              <StatusScreen state={view.state} />
+            </div>
           </div>
         )}
       </main>

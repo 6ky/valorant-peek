@@ -12,6 +12,7 @@ pub struct Mmr {
     pub tier: u32,
     pub rr: u32,
     pub peak: u32,
+    pub peak_season: String,
     pub wins: u32,
     pub games: u32,
     pub leaderboard: u32,
@@ -33,6 +34,7 @@ pub fn parse_mmr(json: &Value) -> Mmr {
         .unwrap_or("");
 
     let mut peak = tier;
+    let mut peak_season = season_id.to_string();
     let mut wins = 0;
     let mut games = 0;
     let mut leaderboard = 0;
@@ -45,15 +47,20 @@ pub fn parse_mmr(json: &Value) -> Mmr {
         for (id, info) in seasons {
             // Peak comes from the tiers actually achieved (WinsByTier keys),
             // not the season-end tier, which can be lower than the peak.
+            let mut season_peak = 0;
             if let Some(wins_by_tier) = info.get("WinsByTier").and_then(|w| w.as_object()) {
                 for key in wins_by_tier.keys() {
                     if let Ok(t) = key.parse::<u32>() {
-                        peak = peak.max(t);
+                        season_peak = season_peak.max(t);
                     }
                 }
             }
             if let Some(t) = info.get("CompetitiveTier").and_then(|v| v.as_u64()) {
-                peak = peak.max(t as u32);
+                season_peak = season_peak.max(t as u32);
+            }
+            if season_peak > peak {
+                peak = season_peak;
+                peak_season = id.clone();
             }
             if id == season_id {
                 wins = info
@@ -73,6 +80,7 @@ pub fn parse_mmr(json: &Value) -> Mmr {
         tier,
         rr,
         peak,
+        peak_season,
         wins,
         games,
         leaderboard,
@@ -231,9 +239,90 @@ pub fn parse_history(json: &Value, sd: &StaticData) -> Vec<HistoryEntry> {
                     .unwrap_or(0) as i32,
                 tier,
                 rank_name: sd.rank_name(tier),
+                ..Default::default()
             }
         })
         .collect()
+}
+
+#[derive(Clone, Default)]
+pub struct MatchStats {
+    pub kills: u32,
+    pub deaths: u32,
+    pub assists: u32,
+    pub acs: u32,
+    pub self_rounds: u32,
+    pub enemy_rounds: u32,
+    pub won: bool,
+    pub agent_icon: String,
+}
+
+pub fn parse_match_stats(detail: &Value, puuid: &str, sd: &StaticData) -> MatchStats {
+    let players = detail.get("players").and_then(|p| p.as_array());
+    let me = match players.and_then(|arr| {
+        arr.iter()
+            .find(|p| p.get("subject").and_then(|v| v.as_str()) == Some(puuid))
+    }) {
+        Some(m) => m,
+        None => return MatchStats::default(),
+    };
+    let character_id = me.get("characterId").and_then(|v| v.as_str()).unwrap_or("");
+    let team_id = me.get("teamId").and_then(|v| v.as_str()).unwrap_or("");
+    let stat = |k: &str| {
+        me.get("stats")
+            .and_then(|s| s.get(k))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32
+    };
+    let rounds = stat("roundsPlayed").max(1);
+    let acs = stat("score") / rounds;
+
+    let mut won = false;
+    let mut self_rounds = 0;
+    let mut enemy_rounds = 0;
+    if let Some(teams) = detail.get("teams").and_then(|t| t.as_array()) {
+        for t in teams {
+            let r = t.get("roundsWon").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            if t.get("teamId").and_then(|v| v.as_str()) == Some(team_id) {
+                self_rounds = r;
+                won = t.get("won").and_then(|v| v.as_bool()).unwrap_or(false);
+            } else {
+                enemy_rounds = enemy_rounds.max(r);
+            }
+        }
+    }
+
+    MatchStats {
+        kills: stat("kills"),
+        deaths: stat("deaths"),
+        assists: stat("assists"),
+        acs,
+        self_rounds,
+        enemy_rounds,
+        won,
+        agent_icon: sd.agent_icon(character_id),
+    }
+}
+
+async fn fetch_match_detail(
+    ctx: &AuthContext,
+    region: &Region,
+    version: &str,
+    match_id: &str,
+) -> Option<Value> {
+    let url = format!("{}/match-details/v1/matches/{}", region.pd_base(), match_id);
+    async {
+        pvp_client()
+            .get(&url)
+            .headers(pvp_headers(ctx, version))
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()
+    }
+    .await
 }
 
 pub async fn fetch_history(
@@ -241,9 +330,10 @@ pub async fn fetch_history(
     region: &Region,
     version: &str,
     sd: &StaticData,
+    cache: &mut HashMap<String, MatchStats>,
 ) -> Vec<HistoryEntry> {
     let url = format!(
-        "{}/mmr/v1/players/{}/competitiveupdates?startIndex=0&endIndex=10&queue=competitive",
+        "{}/mmr/v1/players/{}/competitiveupdates?startIndex=0&endIndex=8&queue=competitive",
         region.pd_base(),
         ctx.puuid
     );
@@ -259,7 +349,50 @@ pub async fn fetch_history(
             .ok()
     }
     .await;
-    body.map(|v| parse_history(&v, sd)).unwrap_or_default()
+    let json = match body {
+        Some(j) => j,
+        None => return Vec::new(),
+    };
+
+    let mut entries = parse_history(&json, sd);
+    let ids: Vec<String> = json
+        .get("Matches")
+        .and_then(|m| m.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|m| m.get("MatchID").and_then(|v| v.as_str()).unwrap_or("").to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for (entry, id) in entries.iter_mut().zip(ids) {
+        if id.is_empty() {
+            continue;
+        }
+        let stats = match cache.get(&id) {
+            Some(s) => Some(s.clone()),
+            None => match fetch_match_detail(ctx, region, version, &id).await {
+                Some(detail) => {
+                    let s = parse_match_stats(&detail, &ctx.puuid, sd);
+                    cache.insert(id.clone(), s.clone());
+                    Some(s)
+                }
+                None => None,
+            },
+        };
+        if let Some(s) = stats {
+            entry.agent_icon = s.agent_icon;
+            entry.kills = s.kills;
+            entry.deaths = s.deaths;
+            entry.assists = s.assists;
+            entry.acs = s.acs;
+            entry.self_rounds = s.self_rounds;
+            entry.enemy_rounds = s.enemy_rounds;
+            entry.won = s.won;
+            entry.has_stats = true;
+        }
+    }
+    entries
 }
 
 /// Build a row for the signed-in user, for display when not in a match.
@@ -291,6 +424,7 @@ pub async fn build_self(
         rr: mmr.rr,
         peak_rank_name: sd.rank_name(mmr.peak),
         peak_rank_tier: mmr.peak,
+        peak_act: sd.season_label(&mmr.peak_season),
         win_rate: win_rate(&mmr),
         wins: mmr.wins,
         games: mmr.games,
@@ -353,6 +487,7 @@ pub async fn build_rows(
             rr: mmr.rr,
             peak_rank_name: sd.rank_name(mmr.peak),
             peak_rank_tier: mmr.peak,
+            peak_act: sd.season_label(&mmr.peak_season),
             win_rate: win_rate(&mmr),
             wins: mmr.wins,
             games: mmr.games,
@@ -368,6 +503,7 @@ pub async fn build_rows(
                 row.rr = prev.rr;
                 row.peak_rank_name = prev.peak_rank_name.clone();
                 row.peak_rank_tier = prev.peak_rank_tier;
+                row.peak_act = prev.peak_act.clone();
                 row.win_rate = prev.win_rate;
                 row.wins = prev.wins;
                 row.games = prev.games;
@@ -442,6 +578,7 @@ mod tests {
         assert_eq!(m.tier, 23);
         assert_eq!(m.rr, 42);
         assert_eq!(m.peak, 25);
+        assert_eq!(m.peak_season, "s2");
         // wins must include placement wins (10), not the lower NumberOfWins (7)
         assert_eq!(m.wins, 10);
         assert_eq!(m.games, 15);

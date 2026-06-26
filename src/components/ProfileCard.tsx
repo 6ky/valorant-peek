@@ -49,6 +49,7 @@ export function ProfileCard({ me }: { me: PlayerRow }) {
         {hasPeak && (
           <span>
             peak <b style={{ color: tierColor(me.peakRankTier) }}>{me.peakRankName}</b>
+            {me.peakAct && <span className="dim"> {me.peakAct}</span>}
           </span>
         )}
       </div>

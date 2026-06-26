@@ -15,6 +15,7 @@ export interface PlayerRow {
   rr: number;
   peakRankName: string;
   peakRankTier: number;
+  peakAct: string;
   winRate: number;
   wins: number;
   games: number;
@@ -27,6 +28,15 @@ export interface HistoryEntry {
   rrChange: number;
   tier: number;
   rankName: string;
+  agentIcon: string;
+  kills: number;
+  deaths: number;
+  assists: number;
+  acs: number;
+  selfRounds: number;
+  enemyRounds: number;
+  won: boolean;
+  hasStats: boolean;
 }
 
 export interface MatchView {
