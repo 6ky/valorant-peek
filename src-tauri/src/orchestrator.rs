@@ -8,6 +8,8 @@ use crate::model::{MatchState, MatchView, PlayerRow};
 use crate::presence::{fetch_self_presence, is_ffa, mode_name};
 use crate::static_cache::{load_or_fetch, StaticData};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -87,7 +89,7 @@ async fn poll_once(
     Some(with_me(assemble_view(state, mode, rows, false)))
 }
 
-pub async fn run_loop(app: AppHandle) {
+pub async fn run_loop(app: AppHandle, rpc_enabled: Arc<AtomicBool>) {
     let cache_dir = app
         .path()
         .app_cache_dir()
@@ -123,7 +125,7 @@ pub async fn run_loop(app: AppHandle) {
         };
 
         let _ = app.emit("match-view", &view);
-        rpc.update(&view);
+        rpc.update(&view, rpc_enabled.load(Ordering::Relaxed));
         tokio::time::sleep(Duration::from_secs(3)).await;
     }
 }
