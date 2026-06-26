@@ -41,6 +41,9 @@ pub struct PlayerRow {
     pub streak: i32,
     // Sum of RR gained or lost over the last handful of competitive games.
     pub rr_trend: i32,
+    // Win and loss counts over those same recent competitive games.
+    pub recent_wins: u32,
+    pub recent_losses: u32,
     // Composite 0 to 100 read on how likely this account is a smurf.
     pub smurf_score: u32,
     // Number of players in this match sharing this player's party (1 is solo).
@@ -113,4 +116,6 @@ pub struct MatchView {
     pub map_image: String,
     pub ally_score: u32,
     pub enemy_score: u32,
+    // True while the per-player combat stats are still filling in.
+    pub combat_loading: bool,
 }
