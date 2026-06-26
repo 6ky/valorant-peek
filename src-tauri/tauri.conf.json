@@ -14,9 +14,9 @@
       {
         "label": "main",
         "title": "Peek",
-        "width": 620,
-        "height": 860,
-        "minWidth": 480,
+        "width": 1040,
+        "height": 760,
+        "minWidth": 720,
         "minHeight": 460,
         "decorations": false,
         "transparent": true,

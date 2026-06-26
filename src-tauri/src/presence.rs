@@ -9,6 +9,10 @@ pub struct Presence {
     pub party_state: String,
     pub provisioning_flow: String,
     pub is_idle: bool,
+    // Current map url and live round score, present while in a game.
+    pub party_owner_match_map: String,
+    pub ally_score: u32,
+    pub enemy_score: u32,
 }
 
 /// The decoded private presence blob comes in two shapes depending on the
@@ -28,12 +32,16 @@ pub fn parse_private(decoded: &Value) -> Presence {
             .unwrap_or("")
             .to_string()
     };
+    let read_u32 = |key: &str| lookup(key).and_then(|v| v.as_u64()).unwrap_or(0) as u32;
     Presence {
         loop_state: read("sessionLoopState"),
         queue_id: read("queueId"),
         party_state: read("partyState"),
         provisioning_flow: read("provisioningFlow"),
         is_idle: lookup("isIdle").and_then(|v| v.as_bool()).unwrap_or(false),
+        party_owner_match_map: read("partyOwnerMatchMap"),
+        ally_score: read_u32("partyOwnerMatchScoreAllyTeam"),
+        enemy_score: read_u32("partyOwnerMatchScoreEnemyTeam"),
     }
 }
 

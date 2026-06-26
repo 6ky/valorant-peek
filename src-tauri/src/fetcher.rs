@@ -231,8 +231,10 @@ pub fn parse_history(json: &Value, sd: &StaticData) -> Vec<HistoryEntry> {
                 .get("TierAfterUpdate")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as u32;
+            let map_id = m.get("MapID").and_then(|v| v.as_str()).unwrap_or("");
             HistoryEntry {
-                map: sd.map_name(m.get("MapID").and_then(|v| v.as_str()).unwrap_or("")),
+                map: sd.map_name(map_id),
+                map_image: sd.map_image(map_id),
                 rr_change: m
                     .get("RankedRatingEarned")
                     .and_then(|v| v.as_i64())
@@ -245,16 +247,48 @@ pub fn parse_history(json: &Value, sd: &StaticData) -> Vec<HistoryEntry> {
         .collect()
 }
 
+/// Headshot percentage for a player, summed over every round's shot damage,
+/// the same way vry computes it.
+pub fn headshot_pct(detail: &Value, puuid: &str) -> u32 {
+    let (mut head, mut body, mut leg) = (0u64, 0u64, 0u64);
+    if let Some(rounds) = detail.get("roundResults").and_then(|r| r.as_array()) {
+        for round in rounds {
+            if let Some(stats) = round.get("playerStats").and_then(|p| p.as_array()) {
+                for ps in stats {
+                    if ps.get("subject").and_then(|v| v.as_str()) != Some(puuid) {
+                        continue;
+                    }
+                    if let Some(damage) = ps.get("damage").and_then(|d| d.as_array()) {
+                        for d in damage {
+                            head += d.get("headshots").and_then(|v| v.as_u64()).unwrap_or(0);
+                            body += d.get("bodyshots").and_then(|v| v.as_u64()).unwrap_or(0);
+                            leg += d.get("legshots").and_then(|v| v.as_u64()).unwrap_or(0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let total = head + body + leg;
+    if total > 0 {
+        (head * 100 / total) as u32
+    } else {
+        0
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct MatchStats {
     pub kills: u32,
     pub deaths: u32,
     pub assists: u32,
     pub acs: u32,
+    pub hs: u32,
     pub self_rounds: u32,
     pub enemy_rounds: u32,
     pub won: bool,
     pub agent_icon: String,
+    pub agent_name: String,
     pub scoreboard: Vec<ScoreEntry>,
 }
 
@@ -320,6 +354,7 @@ pub fn parse_match_stats(detail: &Value, puuid: &str, sd: &StaticData) -> MatchS
                 deaths: g("deaths"),
                 assists: g("assists"),
                 acs: g("score") / rp,
+                hs: headshot_pct(detail, subject),
                 ally: team == team_id,
                 is_self: subject == puuid,
             });
@@ -332,10 +367,12 @@ pub fn parse_match_stats(detail: &Value, puuid: &str, sd: &StaticData) -> MatchS
         deaths: stat("deaths"),
         assists: stat("assists"),
         acs,
+        hs: headshot_pct(detail, puuid),
         self_rounds,
         enemy_rounds,
         won,
         agent_icon: sd.agent_icon(character_id),
+        agent_name: sd.agent_name(character_id),
         scoreboard,
     }
 }
@@ -359,6 +396,234 @@ async fn fetch_match_detail(
             .ok()
     }
     .await
+}
+
+/// Signed run of recent results and the RR sum over them. Walks Matches from
+/// the most recent: streak is the count of leading games sharing the first
+/// non-zero RR sign (positive for a win run, negative for a loss run, 0 if the
+/// latest game broke even). rr_trend sums RankedRatingEarned over all matches.
+fn streak_and_trend(matches: &[Value]) -> (i32, i32) {
+    let earned = |m: &Value| m.get("RankedRatingEarned").and_then(|v| v.as_i64()).unwrap_or(0);
+
+    let rr_trend: i64 = matches.iter().map(earned).sum();
+
+    let mut streak = 0i32;
+    let mut sign = 0i32;
+    for m in matches {
+        let s = match earned(m) {
+            x if x > 0 => 1,
+            x if x < 0 => -1,
+            _ => 0,
+        };
+        if sign == 0 {
+            if s == 0 {
+                break;
+            }
+            sign = s;
+            streak = s;
+        } else if s == sign {
+            streak += sign;
+        } else {
+            break;
+        }
+    }
+    (streak, rr_trend as i32)
+}
+
+/// Recent competitive snapshot for a player: kills, deaths and headshot% from
+/// their most recent match, plus their current streak and RR trend over the
+/// last handful of games. None if they have no recent comp match.
+pub async fn fetch_player_recent(
+    ctx: &AuthContext,
+    region: &Region,
+    version: &str,
+    puuid: &str,
+) -> Option<(u32, u32, u32, i32, i32)> {
+    let url = format!(
+        "{}/mmr/v1/players/{}/competitiveupdates?startIndex=0&endIndex=10&queue=competitive",
+        region.pd_base(),
+        puuid
+    );
+    let cu: Value = async {
+        pvp_client()
+            .get(&url)
+            .headers(pvp_headers(ctx, version))
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()
+    }
+    .await?;
+    let matches = cu.get("Matches").and_then(|m| m.as_array())?;
+    let (streak, rr_trend) = streak_and_trend(matches);
+
+    let match_id = matches
+        .first()
+        .and_then(|m| m.get("MatchID"))
+        .and_then(|v| v.as_str())?
+        .to_string();
+
+    let detail = fetch_match_detail(ctx, region, version, &match_id).await?;
+    let me = detail
+        .get("players")
+        .and_then(|p| p.as_array())
+        .and_then(|arr| {
+            arr.iter()
+                .find(|p| p.get("subject").and_then(|v| v.as_str()) == Some(puuid))
+        })?;
+    let stat = |k: &str| {
+        me.get("stats")
+            .and_then(|s| s.get(k))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32
+    };
+    Some((
+        stat("kills"),
+        stat("deaths"),
+        headshot_pct(&detail, puuid),
+        streak,
+        rr_trend,
+    ))
+}
+
+// Default melee weapon and its skin socket, used to read a player's equipped
+// melee skin from the core-game loadouts.
+const MELEE_WEAPON: &str = "2f59173c-4bed-b6c3-2191-dea9b58be9c7";
+const MELEE_SKIN_SOCKET: &str = "bcef87d6-209b-46c6-8b19-fbe40bd95abc";
+
+// Vandal weapon, sharing the same skin socket as the melee.
+const VANDAL_WEAPON: &str = "9c82e19d-4575-0200-1a81-3eacf00cf872";
+
+/// Skin level id equipped on a given weapon in a loadout entry.
+fn weapon_skin_id<'a>(entry: &'a Value, weapon: &str) -> Option<&'a str> {
+    loadout_items(entry)?
+        .get(weapon)?
+        .get("Sockets")?
+        .get(MELEE_SKIN_SOCKET)?
+        .get("Item")?
+        .get("ID")?
+        .as_str()
+}
+
+fn loadout_items(entry: &Value) -> Option<&Value> {
+    entry
+        .get("Items")
+        .or_else(|| entry.get("Loadout").and_then(|l| l.get("Items")))
+}
+
+fn loadout_subject(entry: &Value) -> Option<&str> {
+    entry
+        .get("Subject")
+        .or_else(|| entry.get("Loadout").and_then(|l| l.get("Subject")))
+        .and_then(|v| v.as_str())
+}
+
+fn melee_skin_id(entry: &Value) -> Option<&str> {
+    weapon_skin_id(entry, MELEE_WEAPON)
+}
+
+/// Equipped Vandal skin name, art, and tier color for a loadout entry. The
+/// default skin (named "Vandal") and any missing lookup yield all-empty fields.
+fn vandal_fields(entry: &Value, sd: &StaticData) -> (String, String, String) {
+    let id = match weapon_skin_id(entry, VANDAL_WEAPON) {
+        Some(id) if !id.is_empty() => id,
+        _ => return Default::default(),
+    };
+    let info = match sd.vandal_skin(id) {
+        Some(i) => i,
+        None => return Default::default(),
+    };
+    if info.name == "Vandal" {
+        return Default::default();
+    }
+    (
+        info.name.clone(),
+        info.image.clone(),
+        sd.tier_color(&info.tier_uuid),
+    )
+}
+
+/// True when the loadout entry runs a melee skin other than the stock one.
+fn has_premium_melee(entry: &Value, default_melee: &str) -> bool {
+    if default_melee.is_empty() {
+        return false;
+    }
+    match melee_skin_id(entry) {
+        Some(id) if !id.is_empty() => !id.eq_ignore_ascii_case(default_melee),
+        _ => false,
+    }
+}
+
+/// Core-game loadouts for every player, aligned to the match's Players order.
+async fn fetch_loadouts(
+    ctx: &AuthContext,
+    region: &Region,
+    version: &str,
+    match_id: &str,
+) -> Option<Vec<Value>> {
+    let url = format!(
+        "{}/core-game/v1/matches/{}/loadouts",
+        region.glz_base(),
+        match_id
+    );
+    let body: Value = async {
+        pvp_client()
+            .get(&url)
+            .headers(pvp_headers(ctx, version))
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()
+    }
+    .await?;
+    body.get("Loadouts").and_then(|l| l.as_array()).cloned()
+}
+
+// Smurf score thresholds, kept together so the heuristic stays tunable.
+const SMURF_DIAMOND_TIER: u32 = 18;
+const SMURF_ASCENDANT_TIER: u32 = 21;
+const SMURF_LOW_LEVEL: u32 = 45;
+const SMURF_FEW_GAMES: u32 = 40;
+const SMURF_MIN_WR_GAMES: u32 = 5;
+const SMURF_STRONG_WR: u32 = 60;
+const SMURF_PREMIUM_LEVEL: u32 = 30;
+const SMURF_MAX: u32 = 100;
+
+/// Heuristic 0 to 100 read on how likely a ranked account is a smurf. Unranked
+/// players score 0. A hidden account level (0) only contributes through the
+/// winrate and games terms, never the level-based ones.
+fn smurf_score(
+    account_level: u32,
+    rank_tier: u32,
+    games: u32,
+    win_rate: u32,
+    premium_skins: bool,
+) -> u32 {
+    if rank_tier == 0 {
+        return 0;
+    }
+    let mut score = 0u32;
+    // High rank carried on a low account level.
+    if rank_tier >= SMURF_DIAMOND_TIER && account_level > 0 && account_level < SMURF_LOW_LEVEL {
+        score += (SMURF_LOW_LEVEL - account_level) * 2;
+    }
+    // Few games played to reach a high rank.
+    if rank_tier >= SMURF_ASCENDANT_TIER && games > 0 && games <= SMURF_FEW_GAMES {
+        score += SMURF_FEW_GAMES - games;
+    }
+    // Strong winrate with a meaningful sample.
+    if games >= SMURF_MIN_WR_GAMES && win_rate >= SMURF_STRONG_WR {
+        score += win_rate - SMURF_STRONG_WR;
+    }
+    // Premium melee on an otherwise fresh account.
+    if premium_skins && account_level > 0 && account_level < SMURF_PREMIUM_LEVEL {
+        score += 10;
+    }
+    score.min(SMURF_MAX)
 }
 
 pub async fn fetch_history(
@@ -418,10 +683,12 @@ pub async fn fetch_history(
         };
         if let Some(s) = stats {
             entry.agent_icon = s.agent_icon;
+            entry.agent_name = s.agent_name;
             entry.kills = s.kills;
             entry.deaths = s.deaths;
             entry.assists = s.assists;
             entry.acs = s.acs;
+            entry.hs = s.hs;
             entry.self_rounds = s.self_rounds;
             entry.enemy_rounds = s.enemy_rounds;
             entry.won = s.won;
@@ -461,12 +728,29 @@ pub async fn build_self(
         rr: mmr.rr,
         peak_rank_name: sd.rank_name(mmr.peak),
         peak_rank_tier: mmr.peak,
+        peak_rank_icon: sd.rank_icon(mmr.peak),
         peak_act: sd.season_label(&mmr.peak_season),
         win_rate: win_rate(&mmr),
         wins: mmr.wins,
         games: mmr.games,
         leaderboard: mmr.leaderboard,
         account_level: level,
+        last_kills: 0,
+        last_deaths: 0,
+        last_hs: 0,
+        has_combat: false,
+        streak: 0,
+        rr_trend: 0,
+        smurf_score: 0,
+        party_size: 0,
+        encounters: 0,
+        encounter_wins: 0,
+        encounter_losses: 0,
+        locked: false,
+        premium_skins: false,
+        vandal_skin: String::new(),
+        vandal_image: String::new(),
+        vandal_tier_color: String::new(),
     })
 }
 
@@ -477,6 +761,8 @@ pub async fn build_rows(
     players: &[RawPlayer],
     sd: &StaticData,
     last_rows: &[PlayerRow],
+    fetch_combat: bool,
+    match_id: Option<&str>,
 ) -> Vec<PlayerRow> {
     let puuids: Vec<String> = players.iter().map(|p| p.puuid.clone()).collect();
     let names = fetch_names(ctx, region, version, &puuids).await;
@@ -486,11 +772,50 @@ pub async fn build_rows(
         .find(|p| p.puuid == ctx.puuid)
         .map(|p| p.team.clone());
 
+    // One core-game call covers premium-skin detection for all ten players.
+    // Map by puuid when present, else fall back to the Players-order index.
+    let mut premium_by_puuid: HashMap<String, bool> = HashMap::new();
+    let mut premium_by_index: Vec<bool> = Vec::new();
+    // Equipped Vandal skin (name, image, tier color) from the same loadouts.
+    type Vandal = (String, String, String);
+    let mut vandal_by_puuid: HashMap<String, Vandal> = HashMap::new();
+    let mut vandal_by_index: Vec<Vandal> = Vec::new();
+    if let Some(mid) = match_id {
+        if let Some(loadouts) = fetch_loadouts(ctx, region, version, mid).await {
+            for entry in &loadouts {
+                let premium = has_premium_melee(entry, &sd.default_melee_skin);
+                premium_by_index.push(premium);
+                let vandal = vandal_fields(entry, sd);
+                vandal_by_index.push(vandal.clone());
+                if let Some(subj) = loadout_subject(entry) {
+                    premium_by_puuid.insert(subj.to_string(), premium);
+                    vandal_by_puuid.insert(subj.to_string(), vandal);
+                }
+            }
+        }
+    }
+
+    // Fetch each player's rank concurrently. Last-match combat stats (K/D, HS)
+    // are an extra request per player, so they are only fetched when the user
+    // opts in, matching vry's behaviour.
+    let fetched = futures::future::join_all(players.iter().map(|p| {
+        let puuid = p.puuid.clone();
+        async move {
+            let mmr = fetch_mmr(ctx, region, version, &puuid).await;
+            let combat = if fetch_combat {
+                fetch_player_recent(ctx, region, version, &puuid).await
+            } else {
+                None
+            };
+            (mmr, combat)
+        }
+    }))
+    .await;
+
     let mut rows = Vec::with_capacity(players.len());
-    for p in players {
-        let fetched = fetch_mmr(ctx, region, version, &p.puuid).await;
-        let rank_failed = fetched.is_none();
-        let mmr = fetched.unwrap_or_default();
+    for (i, (p, (mmr_opt, combat))) in players.iter().zip(fetched).enumerate() {
+        let rank_failed = mmr_opt.is_none();
+        let mmr = mmr_opt.unwrap_or_default();
         let team = match (&self_team, p.team.is_empty()) {
             (_, true) => String::new(),
             (Some(mine), _) if &p.team == mine => "Ally".to_string(),
@@ -509,6 +834,26 @@ pub async fn build_rows(
         } else {
             p.account_level
         };
+        let (last_kills, last_deaths, last_hs, streak, rr_trend, has_combat) = match combat {
+            Some((k, d, h, s, t)) => (k, d, h, s, t, true),
+            None => (0, 0, 0, 0, 0, false),
+        };
+        let party_size = if p.party_id.is_empty() {
+            1
+        } else {
+            players.iter().filter(|q| q.party_id == p.party_id).count() as u32
+        };
+        let premium_skins = premium_by_puuid
+            .get(&p.puuid)
+            .copied()
+            .or_else(|| premium_by_index.get(i).copied())
+            .unwrap_or(false);
+        let (vandal_skin, vandal_image, vandal_tier_color) = vandal_by_puuid
+            .get(&p.puuid)
+            .or_else(|| vandal_by_index.get(i))
+            .cloned()
+            .unwrap_or_default();
+        let smurf = smurf_score(account_level, mmr.tier, mmr.games, win_rate(&mmr), premium_skins);
         let mut row = PlayerRow {
             puuid: p.puuid.clone(),
             name,
@@ -524,12 +869,29 @@ pub async fn build_rows(
             rr: mmr.rr,
             peak_rank_name: sd.rank_name(mmr.peak),
             peak_rank_tier: mmr.peak,
+            peak_rank_icon: sd.rank_icon(mmr.peak),
             peak_act: sd.season_label(&mmr.peak_season),
             win_rate: win_rate(&mmr),
             wins: mmr.wins,
             games: mmr.games,
             leaderboard: mmr.leaderboard,
             account_level,
+            last_kills,
+            last_deaths,
+            last_hs,
+            has_combat,
+            streak,
+            rr_trend,
+            smurf_score: smurf,
+            party_size,
+            encounters: 0,
+            encounter_wins: 0,
+            encounter_losses: 0,
+            locked: p.locked,
+            premium_skins,
+            vandal_skin,
+            vandal_image,
+            vandal_tier_color,
         };
         // On a failed rank request, keep the player's last known rank data.
         if rank_failed {
@@ -545,6 +907,19 @@ pub async fn build_rows(
                 row.wins = prev.wins;
                 row.games = prev.games;
                 row.leaderboard = prev.leaderboard;
+            }
+        }
+        // Keep last-known combat stats if this fetch did not get them.
+        if !row.has_combat {
+            if let Some(prev) = last_rows.iter().find(|r| r.puuid == p.puuid) {
+                if prev.has_combat {
+                    row.last_kills = prev.last_kills;
+                    row.last_deaths = prev.last_deaths;
+                    row.last_hs = prev.last_hs;
+                    row.streak = prev.streak;
+                    row.rr_trend = prev.rr_trend;
+                    row.has_combat = true;
+                }
             }
         }
         rows.push(row);
@@ -586,6 +961,7 @@ pub fn refresh_rows(
             row.agent = sd.agent_name(&p.character_id);
             row.agent_icon = sd.agent_icon(&p.character_id);
             row.player_card = sd.card_art(&p.player_card_id);
+            row.locked = p.locked;
             if !(p.hide_level && !is_self) {
                 row.account_level = p.account_level;
             }
@@ -664,5 +1040,47 @@ mod tests {
             serde_json::from_str(r#"[{"Subject":"p1","GameName":"Ace","TagLine":"NA1"}]"#).unwrap();
         let m = parse_names(&v);
         assert_eq!(m.get("p1").unwrap(), "Ace#NA1");
+    }
+
+    fn rr_matches(values: &[i64]) -> Vec<Value> {
+        values
+            .iter()
+            .map(|v| serde_json::json!({ "RankedRatingEarned": v }))
+            .collect()
+    }
+
+    #[test]
+    fn streak_counts_leading_win_run() {
+        // Three wins then a loss: +3 streak, trend is the full sum.
+        let (streak, trend) = streak_and_trend(&rr_matches(&[20, 18, 15, -12]));
+        assert_eq!(streak, 3);
+        assert_eq!(trend, 41);
+    }
+
+    #[test]
+    fn streak_counts_leading_loss_run() {
+        let (streak, trend) = streak_and_trend(&rr_matches(&[-10, -15, 20]));
+        assert_eq!(streak, -2);
+        assert_eq!(trend, -5);
+    }
+
+    #[test]
+    fn streak_zero_when_latest_breaks_even() {
+        let (streak, trend) = streak_and_trend(&rr_matches(&[0, 20, 18]));
+        assert_eq!(streak, 0);
+        assert_eq!(trend, 38);
+    }
+
+    #[test]
+    fn smurf_flags_obvious_smurf() {
+        // Level 22, Immortal (tier 24), 25 games, 70% winrate.
+        let score = smurf_score(22, 24, 25, 70, false);
+        assert!(score >= 50, "expected a high smurf score, got {score}");
+    }
+
+    #[test]
+    fn smurf_clears_normal_account() {
+        // Level 200, Gold (tier 12), 300 games, 50% winrate.
+        assert_eq!(smurf_score(200, 12, 300, 50, false), 0);
     }
 }

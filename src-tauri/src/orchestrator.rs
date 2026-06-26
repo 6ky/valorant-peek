@@ -1,6 +1,7 @@
 use crate::auth::fetch_auth;
 use crate::client_version::{detect_region_from_log, fetch_client_version, Region};
 use crate::discord::{resolve_app_id, Rpc};
+use crate::encounter::EncounterStore;
 use crate::fetcher::{build_rows, build_self, fetch_history, refresh_rows, MatchStats};
 use std::collections::HashMap;
 use crate::lockfile::read_lockfile;
@@ -28,6 +29,11 @@ pub fn assemble_view(
         me: None,
         history: Vec::new(),
         stale,
+        phase_time: 0,
+        map: String::new(),
+        map_image: String::new(),
+        ally_score: 0,
+        enemy_score: 0,
     }
 }
 
@@ -46,6 +52,13 @@ fn resolve_region() -> Region {
 // every poll, to stay well under Riot's rate limits.
 const SELF_REFRESH_EVERY: u32 = 10;
 
+fn unix_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 async fn poll_once(
     sd: &StaticData,
     region: &Region,
@@ -55,6 +68,8 @@ async fn poll_once(
     last_loop_state: &mut String,
     self_tick: &mut u32,
     match_cache: &mut HashMap<String, MatchStats>,
+    encounters: &mut EncounterStore,
+    fetch_combat: bool,
 ) -> Option<MatchView> {
     let lf = match read_lockfile() {
         Ok(lf) => lf,
@@ -88,6 +103,17 @@ async fn poll_once(
     } else {
         last.history.clone()
     };
+
+    // Once a recorded match shows up in our own history its result is known, so
+    // credit the win or loss to everyone who was in it.
+    if refresh_self {
+        for id in encounters.pending_ids() {
+            if let Some(stats) = match_cache.get(&id) {
+                encounters.apply_outcome(&id, stats.won);
+            }
+        }
+    }
+
     let presence = fetch_self_presence(&lf, &ctx.puuid).await;
     let queue_id = presence
         .as_ref()
@@ -119,19 +145,25 @@ async fn poll_once(
         return Some(with_me(assemble_view(MatchState::Menu, mode, Vec::new(), false)));
     }
 
-    // Like vry: hit Riot's match endpoints only on the transition into a
-    // pregame or game. Otherwise reuse the roster we already fetched. (We keep
-    // trying while we have no roster yet, in case the match was not ready.)
-    if !entered && !last.players.is_empty() {
-        let state = if loop_state == "INGAME" {
-            MatchState::CoreGame
-        } else {
-            MatchState::PreGame
-        };
-        return Some(with_me(assemble_view(state, mode, last.players.clone(), false)));
+    // Hit Riot's match endpoints on the transition into a pregame or game, then
+    // keep retrying the cheap glz endpoints until the roster for the current
+    // phase is actually loaded. When a game starts, the core-game endpoint lags
+    // behind the presence flip to INGAME, so a single fetch at the transition
+    // often still returns only the pregame allies. Without this, that stale
+    // ally-only roster would be reused for the whole match and the enemies would
+    // never appear. Once the full core-game roster is loaded we settle and reuse
+    // it, so this does not turn into continuous polling.
+    let loaded = !last.players.is_empty()
+        && (loop_state != "INGAME" || last.state == MatchState::CoreGame);
+    if !entered && loaded {
+        return Some(with_me(assemble_view(last.state, mode, last.players.clone(), false)));
     }
 
-    let (state, match_id, raw) = current_state(&ctx, region, &v).await;
+    let cs = current_state(&ctx, region, &v).await;
+    let state = cs.state;
+    let match_id = cs.match_id;
+    let raw = cs.players;
+    let phase_time = cs.phase_time;
     if raw.is_empty() {
         *last_match_id = None;
         return Some(with_me(assemble_view(state, mode, Vec::new(), false)));
@@ -143,7 +175,37 @@ async fn poll_once(
     let mut rows = if same_match {
         refresh_rows(&last.players, &raw, sd, &ctx.puuid)
     } else {
-        let fetched = build_rows(&ctx, region, &v, &raw, sd, &last.players).await;
+        // Premium-skin detection needs the core-game match id; pregame has none.
+        let cg_match_id = if state == MatchState::CoreGame {
+            match_id.as_deref()
+        } else {
+            None
+        };
+        let mut fetched =
+            build_rows(&ctx, region, &v, &raw, sd, &last.players, fetch_combat, cg_match_id).await;
+        // Show how often we have seen each player and our record with them, then
+        // record this game so later lobbies can show it. Reading the prior count
+        // before recording keeps the current match out of the shown total.
+        let now = unix_secs();
+        for row in &mut fetched {
+            if row.puuid == ctx.puuid {
+                continue;
+            }
+            let (seen, wins, losses) = encounters.prior(&row.puuid);
+            row.encounters = seen;
+            row.encounter_wins = wins;
+            row.encounter_losses = losses;
+        }
+        if state == MatchState::CoreGame {
+            if let Some(mid) = match_id.as_deref() {
+                let roster: Vec<(String, String, u32)> = fetched
+                    .iter()
+                    .filter(|r| r.puuid != ctx.puuid)
+                    .map(|r| (r.puuid.clone(), r.name.clone(), r.rank_tier))
+                    .collect();
+                encounters.record_seen(mid, &roster, now);
+            }
+        }
         *last_match_id = match_id;
         fetched
     };
@@ -152,16 +214,29 @@ async fn poll_once(
             row.team.clear();
         }
     }
-    Some(with_me(assemble_view(state, mode, rows, false)))
+    let mut view = with_me(assemble_view(state, mode, rows, false));
+    view.phase_time = phase_time;
+    if let Some(p) = presence.as_ref() {
+        view.map = sd.map_name(&p.party_owner_match_map);
+        view.map_image = sd.map_image(&p.party_owner_match_map);
+        view.ally_score = p.ally_score;
+        view.enemy_score = p.enemy_score;
+    }
+    Some(view)
 }
 
-pub async fn run_loop(app: AppHandle, rpc_enabled: Arc<AtomicBool>) {
-    let cache_dir = app
+pub async fn run_loop(
+    app: AppHandle,
+    rpc_enabled: Arc<AtomicBool>,
+    combat_enabled: Arc<AtomicBool>,
+) {
+    let base_dir = app
         .path()
         .app_cache_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("static");
+        .unwrap_or_else(|_| PathBuf::from("."));
+    let cache_dir = base_dir.join("static");
     let static_data = load_or_fetch(&cache_dir).await;
+    let mut encounters = EncounterStore::load(base_dir.join("encounters.json"));
     let region = resolve_region();
     let mut version = fetch_client_version().await.ok();
     let mut last = assemble_view(MatchState::NoGame, String::new(), Vec::new(), false);
@@ -186,6 +261,8 @@ pub async fn run_loop(app: AppHandle, rpc_enabled: Arc<AtomicBool>) {
             &mut last_loop_state,
             &mut self_tick,
             &mut match_cache,
+            &mut encounters,
+            combat_enabled.load(Ordering::Relaxed),
         )
         .await
         {

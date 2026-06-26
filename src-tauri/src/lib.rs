@@ -1,6 +1,7 @@
 mod auth;
 mod client_version;
 mod discord;
+mod encounter;
 mod fetcher;
 mod http;
 mod lockfile;
@@ -18,11 +19,17 @@ use tauri::Manager;
 
 struct AppState {
     rpc_enabled: Arc<AtomicBool>,
+    combat_enabled: Arc<AtomicBool>,
 }
 
 #[tauri::command]
 fn set_rpc_enabled(state: tauri::State<AppState>, enabled: bool) {
     state.rpc_enabled.store(enabled, Ordering::Relaxed);
+}
+
+#[tauri::command]
+fn set_combat_enabled(state: tauri::State<AppState>, enabled: bool) {
+    state.combat_enabled.store(enabled, Ordering::Relaxed);
 }
 
 fn show_main(app: &tauri::AppHandle) {
@@ -64,7 +71,9 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let rpc_enabled = Arc::new(AtomicBool::new(true));
-    let loop_flag = rpc_enabled.clone();
+    let combat_enabled = Arc::new(AtomicBool::new(true));
+    let rpc_flag = rpc_enabled.clone();
+    let combat_flag = combat_enabled.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -75,12 +84,15 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        .manage(AppState { rpc_enabled })
-        .invoke_handler(tauri::generate_handler![set_rpc_enabled])
+        .manage(AppState {
+            rpc_enabled,
+            combat_enabled,
+        })
+        .invoke_handler(tauri::generate_handler![set_rpc_enabled, set_combat_enabled])
         .setup(move |app| {
             build_tray(app)?;
             let handle = app.handle().clone();
-            tauri::async_runtime::spawn(orchestrator::run_loop(handle, loop_flag));
+            tauri::async_runtime::spawn(orchestrator::run_loop(handle, rpc_flag, combat_flag));
             Ok(())
         })
         .run(tauri::generate_context!())
