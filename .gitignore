@@ -10,6 +10,3 @@ src-tauri/gen/schemas
 # scratch
 .superpowers
 BUILD_ENV.md
-
-# trademarked logo, loaded at runtime instead
-src/assets/valorant.svg

@@ -1,10 +1,6 @@
 import { MatchState, HistoryEntry } from "../types";
 import peekLogo from "../assets/peek.svg";
-
-// The VALORANT logo is trademarked, so it is not bundled in this repo. Point
-// this at a hosted copy to show it on standby; it falls back to the Peek mark
-// when unset or unreachable.
-const VALORANT_LOGO_URL = "";
+import valorantLogo from "../assets/valorant.svg";
 
 // The standby screen: shown when VALORANT is not running (NoGame). state still
 // drives the live-status rows. history (when present) powers the last-session
@@ -37,7 +33,7 @@ export function StatusScreen({
           <div className="sb-mark">
             <img
               className="sb-logo"
-              src={VALORANT_LOGO_URL || peekLogo}
+              src={valorantLogo}
               alt=""
               onError={(e) => {
                 const img = e.currentTarget;
