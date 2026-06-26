@@ -1,4 +1,6 @@
-# val-companion
+# Peek
+
+Peek the lobby before you peek the angle.
 
 A lightweight VALORANT match companion. While you are in a match it shows every
 player's rank, peak rank, RR, account level, equipped agent, and party grouping
@@ -10,7 +12,7 @@ Riot client, so it does not depend on any third-party website staying up.
 
 ## Safety
 
-val-companion is read-only. It talks to the local Riot client API on your own
+Peek is read-only. It talks to the local Riot client API on your own
 machine (the same data your game client already has) and to the public Riot PVP
 endpoints. It does not read or modify game memory, inject into the game, or run
 an in-game overlay. It is the same approach used by existing open rank checkers.
