@@ -1,5 +1,6 @@
 mod auth;
 mod client_version;
+mod discord;
 mod fetcher;
 mod http;
 mod lockfile;

@@ -2,7 +2,7 @@ use crate::auth::{pvp_headers, AuthContext};
 use crate::client_version::Region;
 use crate::http::pvp_client;
 use crate::match_state::RawPlayer;
-use crate::model::PlayerRow;
+use crate::model::{HistoryEntry, PlayerRow};
 use crate::static_cache::StaticData;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -124,6 +124,57 @@ pub async fn fetch_account_level(
     body.map(|v| parse_account_level(&v)).unwrap_or(0)
 }
 
+pub fn parse_history(json: &Value, sd: &StaticData) -> Vec<HistoryEntry> {
+    let matches = match json.get("Matches").and_then(|m| m.as_array()) {
+        Some(arr) => arr,
+        None => return Vec::new(),
+    };
+    matches
+        .iter()
+        .map(|m| {
+            let tier = m
+                .get("TierAfterUpdate")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            HistoryEntry {
+                map: sd.map_name(m.get("MapID").and_then(|v| v.as_str()).unwrap_or("")),
+                rr_change: m
+                    .get("RankedRatingEarned")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0) as i32,
+                tier,
+                rank_name: sd.rank_name(tier),
+            }
+        })
+        .collect()
+}
+
+pub async fn fetch_history(
+    ctx: &AuthContext,
+    region: &Region,
+    version: &str,
+    sd: &StaticData,
+) -> Vec<HistoryEntry> {
+    let url = format!(
+        "{}/mmr/v1/players/{}/competitiveupdates?startIndex=0&endIndex=10&queue=competitive",
+        region.pd_base(),
+        ctx.puuid
+    );
+    let body: Option<Value> = async {
+        pvp_client()
+            .get(&url)
+            .headers(pvp_headers(ctx, version))
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()
+    }
+    .await;
+    body.map(|v| parse_history(&v, sd)).unwrap_or_default()
+}
+
 /// Build a row for the signed-in user, for display when not in a match.
 pub async fn build_self(
     ctx: &AuthContext,
@@ -230,6 +281,29 @@ mod tests {
     fn parses_mmr_handles_missing() {
         let v: Value = serde_json::from_str("{}").unwrap();
         assert_eq!(parse_mmr(&v), (0, 0, 0));
+    }
+
+    #[test]
+    fn parses_history_rr_changes() {
+        use std::collections::HashMap;
+        let sd = StaticData {
+            tiers: HashMap::from([(18u32, "Diamond 1".to_string())]),
+            agents: HashMap::new(),
+            maps: HashMap::from([("/Game/Maps/Bonsai/Bonsai".to_string(), "Split".to_string())]),
+        };
+        let v: Value = serde_json::from_str(
+            r#"{"Matches":[
+                {"MapID":"/Game/Maps/Bonsai/Bonsai","RankedRatingEarned":18,"TierAfterUpdate":18},
+                {"MapID":"/Game/Maps/Bonsai/Bonsai","RankedRatingEarned":-21,"TierAfterUpdate":18}
+            ]}"#,
+        )
+        .unwrap();
+        let hist = parse_history(&v, &sd);
+        assert_eq!(hist.len(), 2);
+        assert_eq!(hist[0].rr_change, 18);
+        assert_eq!(hist[0].map, "Split");
+        assert_eq!(hist[0].rank_name, "Diamond 1");
+        assert_eq!(hist[1].rr_change, -21);
     }
 
     #[test]

@@ -225,6 +225,55 @@ body {
   font-weight: 700;
 }
 
+.history {
+  width: 100%;
+  max-width: 360px;
+}
+
+.history-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.history-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.hpill {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 3px 7px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+
+.pos {
+  color: #2fcb6e;
+}
+
+.neg {
+  color: #ff5470;
+}
+
+.hpill.pos {
+  background: rgba(47, 203, 110, 0.12);
+  border-color: rgba(47, 203, 110, 0.3);
+}
+
+.hpill.neg {
+  background: rgba(255, 84, 112, 0.12);
+  border-color: rgba(255, 84, 112, 0.3);
+}
+
 /* Roster */
 .roster {
   display: flex;

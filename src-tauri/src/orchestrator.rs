@@ -1,6 +1,7 @@
 use crate::auth::fetch_auth;
 use crate::client_version::{detect_region_from_log, fetch_client_version, Region};
-use crate::fetcher::{build_rows, build_self};
+use crate::discord::Rpc;
+use crate::fetcher::{build_rows, build_self, fetch_history};
 use crate::lockfile::read_lockfile;
 use crate::match_state::current_state;
 use crate::model::{MatchState, MatchView, PlayerRow};
@@ -21,6 +22,7 @@ pub fn assemble_view(
         mode,
         players: rows,
         me: None,
+        history: Vec::new(),
         stale,
     }
 }
@@ -52,8 +54,10 @@ async fn poll_once(
     let v = version.clone()?;
 
     let me = build_self(&ctx, region, &v, sd).await;
+    let history = fetch_history(&ctx, region, &v, sd).await;
     let with_me = |view: MatchView| MatchView {
         me: Some(me.clone()),
+        history: history.clone(),
         ..view
     };
 
@@ -94,26 +98,35 @@ pub async fn run_loop(app: AppHandle) {
     let mut version = fetch_client_version().await.ok();
     let mut last = assemble_view(MatchState::NoGame, String::new(), Vec::new(), false);
 
+    let start = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let mut rpc = Rpc::new(
+        std::env::var("PEEK_DISCORD_APP_ID").unwrap_or_default(),
+        start,
+    );
+
     loop {
-        match poll_once(&static_data, &region, &mut version).await {
+        let view = match poll_once(&static_data, &region, &mut version).await {
             Some(view) => {
                 last = view.clone();
-                let _ = app.emit("match-view", &view);
+                view
+            }
+            // Surface a stale badge only if we had a populated table; otherwise
+            // this is idle time with no game ready.
+            None if last.players.is_empty() => {
+                assemble_view(MatchState::NoGame, String::new(), Vec::new(), false)
             }
             None => {
-                // Only surface a stale badge if we were actually showing a
-                // populated table. Otherwise this is just idle time with no
-                // game ready, which should read as "waiting".
-                if last.players.is_empty() {
-                    let idle = assemble_view(MatchState::NoGame, String::new(), Vec::new(), false);
-                    let _ = app.emit("match-view", &idle);
-                } else {
-                    let mut stale = last.clone();
-                    stale.stale = true;
-                    let _ = app.emit("match-view", &stale);
-                }
+                let mut stale = last.clone();
+                stale.stale = true;
+                stale
             }
-        }
+        };
+
+        let _ = app.emit("match-view", &view);
+        rpc.update(&view);
         tokio::time::sleep(Duration::from_secs(3)).await;
     }
 }
