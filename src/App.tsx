@@ -29,20 +29,32 @@ const STATE_LABEL: Record<MatchState, string> = {
 export default function App() {
   const [view, setView] = useState<MatchView>(INITIAL);
   const [askClose, setAskClose] = useState(false);
+  const [exiting, setExiting] = useState(false);
   const win = getCurrentWindow();
+
+  function performExit(action: "tray" | "quit") {
+    setExiting(true);
+    window.setTimeout(() => {
+      if (action === "quit") {
+        win.close();
+      } else {
+        win.hide();
+        setExiting(false);
+      }
+    }, 200);
+  }
 
   function onCloseClick() {
     const remembered = localStorage.getItem(CLOSE_PREF_KEY);
-    if (remembered === "tray") return void win.hide();
-    if (remembered === "quit") return void win.close();
+    if (remembered === "tray") return performExit("tray");
+    if (remembered === "quit") return performExit("quit");
     setAskClose(true);
   }
 
   function resolveClose(action: "tray" | "quit", remember: boolean) {
     if (remember) localStorage.setItem(CLOSE_PREF_KEY, action);
     setAskClose(false);
-    if (action === "tray") win.hide();
-    else win.close();
+    performExit(action);
   }
 
   useEffect(() => {
@@ -57,7 +69,7 @@ export default function App() {
   const live = view.state === "CoreGame" || view.state === "PreGame";
 
   return (
-    <div className="app">
+    <div className={`app${exiting ? " exiting" : ""}`}>
       <header className="titlebar" data-tauri-drag-region>
         <span className="wordmark" data-tauri-drag-region>
           PEE<span className="wordmark-accent">K</span>
