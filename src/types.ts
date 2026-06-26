@@ -15,10 +15,18 @@ export interface PlayerRow {
   accountLevel: number;
 }
 
+export interface HistoryEntry {
+  map: string;
+  rrChange: number;
+  tier: number;
+  rankName: string;
+}
+
 export interface MatchView {
   state: MatchState;
   mode: string;
   players: PlayerRow[];
   me: PlayerRow | null;
+  history: HistoryEntry[];
   stale: boolean;
 }

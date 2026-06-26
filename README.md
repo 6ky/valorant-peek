@@ -62,6 +62,20 @@ VAL_SHARD=eu
 
 Common regions: `na`, `eu`, `ap`, `kr`, `br`, `latam`.
 
+## Discord Rich Presence
+
+Peek can show your status ("In a Competitive match", your rank, elapsed time) on
+your Discord profile. It is off until you give it a Discord application id:
+
+1. Open https://discord.com/developers/applications and create a new
+   application named "Peek". Copy its Application ID.
+2. Optional, for the logo: under Rich Presence > Art Assets, upload the Peek
+   icon and name the asset key exactly `logo`.
+3. Set the environment variable `PEEK_DISCORD_APP_ID` to that Application ID,
+   then start Peek with the Discord desktop app running.
+
+If the variable is not set, rich presence stays off and nothing else changes.
+
 ## How it works
 
 1. Read the local client lockfile for the API port and password.

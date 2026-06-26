@@ -5,8 +5,16 @@ import { MatchView, MatchState } from "./types";
 import { StatusScreen } from "./components/StatusScreen";
 import { PlayerTable } from "./components/PlayerTable";
 import { ProfileCard } from "./components/ProfileCard";
+import { HistoryStrip } from "./components/HistoryStrip";
 
-const INITIAL: MatchView = { state: "NoGame", mode: "", players: [], me: null, stale: false };
+const INITIAL: MatchView = {
+  state: "NoGame",
+  mode: "",
+  players: [],
+  me: null,
+  history: [],
+  stale: false,
+};
 
 const STATE_LABEL: Record<MatchState, string> = {
   NoGame: "Offline",
@@ -75,6 +83,7 @@ export default function App() {
         ) : (
           <div className="idle">
             {view.me && <ProfileCard me={view.me} />}
+            <HistoryStrip history={view.history} />
             <StatusScreen state={view.state} />
           </div>
         )}

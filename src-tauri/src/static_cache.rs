@@ -5,6 +5,7 @@ use std::path::Path;
 pub struct StaticData {
     pub tiers: HashMap<u32, String>,
     pub agents: HashMap<String, String>,
+    pub maps: HashMap<String, String>,
 }
 
 impl StaticData {
@@ -17,6 +18,10 @@ impl StaticData {
 
     pub fn agent_name(&self, id: &str) -> String {
         self.agents.get(id).cloned().unwrap_or_default()
+    }
+
+    pub fn map_name(&self, map_url: &str) -> String {
+        self.maps.get(map_url).cloned().unwrap_or_default()
     }
 }
 
@@ -46,6 +51,20 @@ pub fn parse_agents(json: &Value) -> HashMap<String, String> {
             agent.get("displayName").and_then(|v| v.as_str()),
         ) {
             out.insert(uuid.to_string(), name.to_string());
+        }
+    }
+    out
+}
+
+pub fn parse_maps(json: &Value) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let maps = json.get("data").and_then(|d| d.as_array());
+    for map in maps.into_iter().flatten() {
+        if let (Some(url), Some(name)) = (
+            map.get("mapUrl").and_then(|v| v.as_str()),
+            map.get("displayName").and_then(|v| v.as_str()),
+        ) {
+            out.insert(url.to_string(), name.to_string());
         }
     }
     out
@@ -98,9 +117,24 @@ pub async fn load_or_fetch(cache_dir: &Path) -> StaticData {
         }
     };
 
+    let maps_path = cache_dir.join("maps.json");
+    let maps_json = match read_cached(&maps_path) {
+        Some(v) => v,
+        None => {
+            let v = fetch_json("https://valorant-api.com/v1/maps")
+                .await
+                .unwrap_or_else(|| serde_json::json!({"data": []}));
+            if let Ok(text) = serde_json::to_string(&v) {
+                let _ = std::fs::write(&maps_path, text);
+            }
+            v
+        }
+    };
+
     StaticData {
         tiers: parse_tiers(&tiers_json),
         agents: parse_agents(&agents_json),
+        maps: parse_maps(&maps_json),
     }
 }
 
@@ -121,10 +155,21 @@ mod tests {
         let sd = StaticData {
             tiers: parse_tiers(&tiers),
             agents: parse_agents(&agents),
+            maps: HashMap::new(),
         };
         assert_eq!(sd.rank_name(21), "IMMORTAL 3");
         assert_eq!(sd.rank_name(999), "Unranked");
         assert_eq!(sd.agent_name("abc"), "Jett");
         assert_eq!(sd.agent_name("missing"), "");
+    }
+
+    #[test]
+    fn maps_url_to_name() {
+        let v: Value = serde_json::from_str(
+            r#"{"data":[{"mapUrl":"/Game/Maps/Ascent/Ascent","displayName":"Ascent"}]}"#,
+        )
+        .unwrap();
+        let maps = parse_maps(&v);
+        assert_eq!(maps.get("/Game/Maps/Ascent/Ascent").unwrap(), "Ascent");
     }
 }

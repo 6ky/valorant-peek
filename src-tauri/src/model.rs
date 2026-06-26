@@ -27,10 +27,20 @@ pub struct PlayerRow {
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct HistoryEntry {
+    pub map: String,
+    pub rr_change: i32,
+    pub tier: u32,
+    pub rank_name: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct MatchView {
     pub state: MatchState,
     pub mode: String,
     pub players: Vec<PlayerRow>,
     pub me: Option<PlayerRow>,
+    pub history: Vec<HistoryEntry>,
     pub stale: bool,
 }
