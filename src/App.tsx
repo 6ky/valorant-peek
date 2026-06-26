@@ -15,6 +15,7 @@ const CLOSE_PREF_KEY = "peek.closeAction";
 const INITIAL: MatchView = {
   state: "NoGame",
   mode: "",
+  activity: "",
   players: [],
   me: null,
   history: [],
@@ -78,6 +79,8 @@ export default function App() {
   const showTable =
     (view.state === "CoreGame" || view.state === "PreGame") && view.players.length > 0;
   const live = view.state === "CoreGame" || view.state === "PreGame";
+  const queued = view.activity.toLowerCase().includes("queue");
+  const pillKind = live ? "live" : queued ? "queue" : "";
 
   return (
     <div className={`app${exiting ? " exiting" : ""}`}>
@@ -85,11 +88,10 @@ export default function App() {
         <span className="wordmark" data-tauri-drag-region>
           PEE<span className="wordmark-accent">K</span>
         </span>
-        <span className={`state-pill ${live ? "state-live" : ""}`}>
+        <span className={`state-pill ${pillKind ? `state-${pillKind}` : ""}`}>
           <span className="state-dot" />
-          {STATE_LABEL[view.state]}
+          {view.activity || STATE_LABEL[view.state]}
         </span>
-        {view.mode && live && <span className="mode-pill">{view.mode}</span>}
         {view.stale && <span className="stale">stale</span>}
         <span className="win-controls">
           <button

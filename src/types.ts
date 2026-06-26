@@ -54,6 +54,7 @@ export interface HistoryEntry {
 export interface MatchView {
   state: MatchState;
   mode: string;
+  activity: string;
   players: PlayerRow[];
   me: PlayerRow | null;
   history: HistoryEntry[];

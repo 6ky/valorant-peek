@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use crate::lockfile::read_lockfile;
 use crate::match_state::current_state;
 use crate::model::{MatchState, MatchView, PlayerRow};
-use crate::presence::{fetch_self_presence, is_ffa, mode_name};
+use crate::presence::{describe_activity, fetch_self_presence, is_ffa, mode_name};
 use crate::static_cache::{load_or_fetch, StaticData};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,6 +23,7 @@ pub fn assemble_view(
     MatchView {
         state,
         mode,
+        activity: String::new(),
         players: rows,
         me: None,
         history: Vec::new(),
@@ -87,12 +88,6 @@ async fn poll_once(
     } else {
         last.history.clone()
     };
-    let with_me = |view: MatchView| MatchView {
-        me: me.clone(),
-        history: history.clone(),
-        ..view
-    };
-
     let presence = fetch_self_presence(&lf, &ctx.puuid).await;
     let queue_id = presence
         .as_ref()
@@ -100,6 +95,17 @@ async fn poll_once(
         .unwrap_or_default();
     let mode = mode_name(&queue_id);
     let loop_state = presence.as_ref().map(|p| p.loop_state.as_str()).unwrap_or("");
+    let activity = presence
+        .as_ref()
+        .map(|p| describe_activity(p, &mode))
+        .unwrap_or_else(|| "Idle".to_string());
+
+    let with_me = |view: MatchView| MatchView {
+        me: me.clone(),
+        history: history.clone(),
+        activity: activity.clone(),
+        ..view
+    };
 
     // Detect the game state transition from the local presence (a free call).
     // Riot's match servers are only touched when we are actually in a pregame
