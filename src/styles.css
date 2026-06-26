@@ -283,16 +283,87 @@ body {
 }
 
 .match-detail {
+  padding: 8px 11px 10px;
+  border-top: 1px solid #1a1d24;
+}
+
+.md-summary {
   display: flex;
   gap: 16px;
-  padding: 8px 12px 9px 30px;
-  border-top: 1px solid #1a1d24;
   font-size: 11.5px;
   color: var(--muted);
   font-family: var(--font-mono);
+  margin-bottom: 9px;
 }
-.match-detail b {
+.md-summary b {
   color: var(--text);
+}
+
+.scoreboard {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sb-divider {
+  height: 1px;
+  background: #20242d;
+  margin: 5px 0;
+}
+
+.sb-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto auto;
+  align-items: center;
+  gap: 9px;
+  padding: 3px 6px;
+  border-left: 2px solid transparent;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.sb-row.ally {
+  border-left-color: rgba(40, 200, 160, 0.55);
+}
+.sb-row.enemy {
+  border-left-color: rgba(255, 84, 112, 0.55);
+}
+.sb-row.self {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sb-agent {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: #1a1e26;
+}
+.sb-agent.empty {
+  background: #161a22;
+}
+
+.sb-name {
+  color: #cfd3da;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sb-row.self .sb-name {
+  color: #fff;
+  font-weight: 600;
+}
+
+.sb-kda {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.sb-acs {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #aab0b8;
+  min-width: 32px;
+  text-align: right;
 }
 
 .matches-net {
