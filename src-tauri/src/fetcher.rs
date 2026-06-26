@@ -14,6 +14,7 @@ pub struct Mmr {
     pub peak: u32,
     pub wins: u32,
     pub games: u32,
+    pub leaderboard: u32,
 }
 
 pub fn parse_mmr(json: &Value) -> Mmr {
@@ -34,6 +35,7 @@ pub fn parse_mmr(json: &Value) -> Mmr {
     let mut peak = tier;
     let mut wins = 0;
     let mut games = 0;
+    let mut leaderboard = 0;
     let seasons = json
         .get("QueueSkills")
         .and_then(|q| q.get("competitive"))
@@ -54,8 +56,16 @@ pub fn parse_mmr(json: &Value) -> Mmr {
                 peak = peak.max(t as u32);
             }
             if id == season_id {
-                wins = info.get("NumberOfWins").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                wins = info
+                    .get("NumberOfWinsWithPlacements")
+                    .or_else(|| info.get("NumberOfWins"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
                 games = info.get("NumberOfGames").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                leaderboard = info
+                    .get("LeaderboardRank")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
             }
         }
     }
@@ -65,6 +75,7 @@ pub fn parse_mmr(json: &Value) -> Mmr {
         peak,
         wins,
         games,
+        leaderboard,
     }
 }
 
@@ -246,7 +257,9 @@ pub async fn build_self(
         peak_rank_name: sd.rank_name(mmr.peak),
         peak_rank_tier: mmr.peak,
         win_rate: win_rate(&mmr),
+        wins: mmr.wins,
         games: mmr.games,
+        leaderboard: mmr.leaderboard,
         account_level: level,
     })
 }
@@ -305,7 +318,9 @@ pub async fn build_rows(
             peak_rank_name: sd.rank_name(mmr.peak),
             peak_rank_tier: mmr.peak,
             win_rate: win_rate(&mmr),
+            wins: mmr.wins,
             games: mmr.games,
+            leaderboard: mmr.leaderboard,
             account_level,
         };
         // On a failed rank request, keep the player's last known rank data.
@@ -318,7 +333,9 @@ pub async fn build_rows(
                 row.peak_rank_name = prev.peak_rank_name.clone();
                 row.peak_rank_tier = prev.peak_rank_tier;
                 row.win_rate = prev.win_rate;
+                row.wins = prev.wins;
                 row.games = prev.games;
+                row.leaderboard = prev.leaderboard;
             }
         }
         rows.push(row);
@@ -380,7 +397,7 @@ mod tests {
               "LatestCompetitiveUpdate":{"TierAfterUpdate":23,"RankedRatingAfterUpdate":42,"SeasonID":"s2"},
               "QueueSkills":{"competitive":{"SeasonalInfoBySeasonID":{
                 "s1":{"CompetitiveTier":18,"WinsByTier":{"17":3,"18":5}},
-                "s2":{"CompetitiveTier":23,"WinsByTier":{"24":4,"25":2},"NumberOfWins":28,"NumberOfGames":50}
+                "s2":{"CompetitiveTier":23,"WinsByTier":{"24":4,"25":2},"NumberOfWins":7,"NumberOfWinsWithPlacements":10,"NumberOfGames":15,"LeaderboardRank":0}
               }}}}"#,
         )
         .unwrap();
@@ -388,9 +405,10 @@ mod tests {
         assert_eq!(m.tier, 23);
         assert_eq!(m.rr, 42);
         assert_eq!(m.peak, 25);
-        assert_eq!(m.wins, 28);
-        assert_eq!(m.games, 50);
-        assert_eq!(win_rate(&m), 56);
+        // wins must include placement wins (10), not the lower NumberOfWins (7)
+        assert_eq!(m.wins, 10);
+        assert_eq!(m.games, 15);
+        assert_eq!(win_rate(&m), 66);
     }
 
     #[test]

@@ -47,10 +47,18 @@ export function PlayerRow({ row }: { row: Row }) {
         </span>
         <span className="prow-meta">
           <span style={{ color }}>{ranked ? row.rankName : "Unranked"}</span>
+          {row.leaderboard > 0 && (
+            <>
+              <span className="dot-sep">&middot;</span>
+              <span className="lb">#{row.leaderboard}</span>
+            </>
+          )}
           {row.games > 0 && (
             <>
               <span className="dot-sep">&middot;</span>
-              <span>{row.winRate}% wr</span>
+              <span>
+                {row.wins}W {row.games - row.wins}L ({row.winRate}%)
+              </span>
             </>
           )}
           {hasPeak && (

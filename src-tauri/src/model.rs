@@ -25,7 +25,9 @@ pub struct PlayerRow {
     pub peak_rank_name: String,
     pub peak_rank_tier: u32,
     pub win_rate: u32,
+    pub wins: u32,
     pub games: u32,
+    pub leaderboard: u32,
     pub account_level: u32,
 }
 
