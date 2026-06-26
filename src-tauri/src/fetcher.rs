@@ -114,7 +114,14 @@ pub async fn fetch_names(
     body.map(|v| parse_names(&v)).unwrap_or_default()
 }
 
-pub async fn fetch_mmr(ctx: &AuthContext, region: &Region, version: &str, puuid: &str) -> Mmr {
+/// Returns None when the request itself failed (so callers can keep the last
+/// known value instead of showing blank/unranked data).
+pub async fn fetch_mmr(
+    ctx: &AuthContext,
+    region: &Region,
+    version: &str,
+    puuid: &str,
+) -> Option<Mmr> {
     let url = format!("{}/mmr/v1/players/{}", region.pd_base(), puuid);
     let body: Option<Value> = async {
         pvp_client()
@@ -128,7 +135,7 @@ pub async fn fetch_mmr(ctx: &AuthContext, region: &Region, version: &str, puuid:
             .ok()
     }
     .await;
-    body.map(|v| parse_mmr(&v)).unwrap_or_default()
+    body.map(|v| parse_mmr(&v))
 }
 
 pub fn parse_account_level(json: &Value) -> u32 {
@@ -217,12 +224,14 @@ pub async fn build_self(
     region: &Region,
     version: &str,
     sd: &StaticData,
-) -> PlayerRow {
+) -> Option<PlayerRow> {
+    // If the rank request fails, return None so the caller keeps the last
+    // known profile instead of flashing unranked.
+    let mmr = fetch_mmr(ctx, region, version, &ctx.puuid).await?;
     let puuids = [ctx.puuid.clone()];
     let names = fetch_names(ctx, region, version, &puuids).await;
-    let mmr = fetch_mmr(ctx, region, version, &ctx.puuid).await;
     let level = fetch_account_level(ctx, region, version, &ctx.puuid).await;
-    PlayerRow {
+    Some(PlayerRow {
         puuid: ctx.puuid.clone(),
         name: names.get(&ctx.puuid).cloned().unwrap_or_default(),
         agent: String::new(),
@@ -239,7 +248,7 @@ pub async fn build_self(
         win_rate: win_rate(&mmr),
         games: mmr.games,
         account_level: level,
-    }
+    })
 }
 
 pub async fn build_rows(
@@ -248,6 +257,7 @@ pub async fn build_rows(
     version: &str,
     players: &[RawPlayer],
     sd: &StaticData,
+    last_rows: &[PlayerRow],
 ) -> Vec<PlayerRow> {
     let puuids: Vec<String> = players.iter().map(|p| p.puuid.clone()).collect();
     let names = fetch_names(ctx, region, version, &puuids).await;
@@ -259,7 +269,9 @@ pub async fn build_rows(
 
     let mut rows = Vec::with_capacity(players.len());
     for p in players {
-        let mmr = fetch_mmr(ctx, region, version, &p.puuid).await;
+        let fetched = fetch_mmr(ctx, region, version, &p.puuid).await;
+        let rank_failed = fetched.is_none();
+        let mmr = fetched.unwrap_or_default();
         let team = match (&self_team, p.team.is_empty()) {
             (_, true) => String::new(),
             (Some(mine), _) if &p.team == mine => "Ally".to_string(),
@@ -278,7 +290,7 @@ pub async fn build_rows(
         } else {
             p.account_level
         };
-        rows.push(PlayerRow {
+        let mut row = PlayerRow {
             puuid: p.puuid.clone(),
             name,
             agent: sd.agent_name(&p.character_id),
@@ -295,9 +307,64 @@ pub async fn build_rows(
             win_rate: win_rate(&mmr),
             games: mmr.games,
             account_level,
-        });
+        };
+        // On a failed rank request, keep the player's last known rank data.
+        if rank_failed {
+            if let Some(prev) = last_rows.iter().find(|r| r.puuid == p.puuid) {
+                row.rank_tier = prev.rank_tier;
+                row.rank_name = prev.rank_name.clone();
+                row.rank_icon = prev.rank_icon.clone();
+                row.rr = prev.rr;
+                row.peak_rank_name = prev.peak_rank_name.clone();
+                row.peak_rank_tier = prev.peak_rank_tier;
+                row.win_rate = prev.win_rate;
+                row.games = prev.games;
+            }
+        }
+        rows.push(row);
     }
     rows
+}
+
+/// Rebuild rows for the current match from cached rank data, refreshing only
+/// the cheap fields (agent, team, level) that come from the match payload.
+/// Avoids re-fetching ranks every poll while still updating agent picks.
+pub fn refresh_rows(
+    cached: &[PlayerRow],
+    raw: &[RawPlayer],
+    sd: &StaticData,
+    self_puuid: &str,
+) -> Vec<PlayerRow> {
+    let self_team = raw
+        .iter()
+        .find(|p| p.puuid == self_puuid)
+        .map(|p| p.team.clone());
+
+    raw.iter()
+        .map(|p| {
+            let mut row = cached
+                .iter()
+                .find(|r| r.puuid == p.puuid)
+                .cloned()
+                .unwrap_or_else(|| PlayerRow {
+                    puuid: p.puuid.clone(),
+                    ..Default::default()
+                });
+            let is_self = p.puuid == self_puuid;
+            row.team = match (&self_team, p.team.is_empty()) {
+                (_, true) => String::new(),
+                (Some(mine), _) if &p.team == mine => "Ally".to_string(),
+                (Some(_), _) => "Enemy".to_string(),
+                (None, _) => p.team.clone(),
+            };
+            row.agent = sd.agent_name(&p.character_id);
+            row.agent_icon = sd.agent_icon(&p.character_id);
+            if !(p.hide_level && !is_self) {
+                row.account_level = p.account_level;
+            }
+            row
+        })
+        .collect()
 }
 
 #[cfg(test)]

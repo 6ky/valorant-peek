@@ -8,7 +8,7 @@ pub enum MatchState {
     CoreGame,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerRow {
     pub puuid: String,

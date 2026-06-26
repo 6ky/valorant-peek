@@ -1,38 +1,38 @@
 @font-face {
-  font-family: "Chakra Petch";
-  font-weight: 500;
-  font-display: swap;
-  src: url("./fonts/chakra-500.woff2") format("woff2");
-}
-@font-face {
-  font-family: "Chakra Petch";
-  font-weight: 600;
-  font-display: swap;
-  src: url("./fonts/chakra-600.woff2") format("woff2");
-}
-@font-face {
-  font-family: "Chakra Petch";
-  font-weight: 700;
-  font-display: swap;
-  src: url("./fonts/chakra-700.woff2") format("woff2");
-}
-@font-face {
-  font-family: "Saira";
+  font-family: "Geist";
   font-weight: 400;
   font-display: swap;
-  src: url("./fonts/saira-400.woff2") format("woff2");
+  src: url("./fonts/geist-400.woff2") format("woff2");
 }
 @font-face {
-  font-family: "Saira";
+  font-family: "Geist";
   font-weight: 500;
   font-display: swap;
-  src: url("./fonts/saira-500.woff2") format("woff2");
+  src: url("./fonts/geist-500.woff2") format("woff2");
 }
 @font-face {
-  font-family: "Saira";
+  font-family: "Geist";
   font-weight: 600;
   font-display: swap;
-  src: url("./fonts/saira-600.woff2") format("woff2");
+  src: url("./fonts/geist-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist";
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/geist-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-weight: 500;
+  font-display: swap;
+  src: url("./fonts/geistmono-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-weight: 600;
+  font-display: swap;
+  src: url("./fonts/geistmono-600.woff2") format("woff2");
 }
 
 :root {
@@ -44,29 +44,23 @@
   --accent: #ff4655;
   --ally: #28c8a0;
 
-  --font-body: "Saira", "Segoe UI", system-ui, sans-serif;
-  --font-display: "Chakra Petch", "Saira", sans-serif;
+  --font-body: "Geist", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
 
   font-family: var(--font-body);
   font-synthesis: none;
 }
 
-/* Tactical display face for labels, headers, ranks, and data */
-.wordmark,
-.state-pill,
-.mode-pill,
-.stale,
-.team-head,
-.team-count,
-.history-head,
-.profile-rankname,
-.profile-rank,
-.modal-title,
-.setting-label,
-.seg-btn,
+/* Monospace for data so numbers align and read like a readout */
 .prow-rr,
-.profile-stats b {
-  font-family: var(--font-display);
+.prow-level,
+.profile-stats,
+.hpill,
+.history-head .pos,
+.history-head .neg,
+.profile-level,
+.team-count {
+  font-family: var(--font-mono);
 }
 
 * {
