@@ -2,9 +2,12 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 
+#[derive(Default)]
 pub struct StaticData {
     pub tiers: HashMap<u32, String>,
+    pub tier_icons: HashMap<u32, String>,
     pub agents: HashMap<String, String>,
+    pub agent_icons: HashMap<String, String>,
     pub maps: HashMap<String, String>,
 }
 
@@ -16,8 +19,16 @@ impl StaticData {
             .unwrap_or_else(|| "Unranked".to_string())
     }
 
+    pub fn rank_icon(&self, tier: u32) -> String {
+        self.tier_icons.get(&tier).cloned().unwrap_or_default()
+    }
+
     pub fn agent_name(&self, id: &str) -> String {
         self.agents.get(id).cloned().unwrap_or_default()
+    }
+
+    pub fn agent_icon(&self, id: &str) -> String {
+        self.agent_icons.get(id).cloned().unwrap_or_default()
     }
 
     pub fn map_name(&self, map_url: &str) -> String {
@@ -42,6 +53,23 @@ pub fn parse_tiers(json: &Value) -> HashMap<u32, String> {
     out
 }
 
+pub fn parse_tier_icons(json: &Value) -> HashMap<u32, String> {
+    let mut out = HashMap::new();
+    let episodes = json.get("data").and_then(|d| d.as_array());
+    for episode in episodes.into_iter().flatten() {
+        let tiers = episode.get("tiers").and_then(|t| t.as_array());
+        for tier in tiers.into_iter().flatten() {
+            if let (Some(n), Some(icon)) = (
+                tier.get("tier").and_then(|v| v.as_u64()),
+                tier.get("largeIcon").and_then(|v| v.as_str()),
+            ) {
+                out.insert(n as u32, icon.to_string());
+            }
+        }
+    }
+    out
+}
+
 pub fn parse_agents(json: &Value) -> HashMap<String, String> {
     let mut out = HashMap::new();
     let agents = json.get("data").and_then(|d| d.as_array());
@@ -51,6 +79,20 @@ pub fn parse_agents(json: &Value) -> HashMap<String, String> {
             agent.get("displayName").and_then(|v| v.as_str()),
         ) {
             out.insert(uuid.to_string(), name.to_string());
+        }
+    }
+    out
+}
+
+pub fn parse_agent_icons(json: &Value) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let agents = json.get("data").and_then(|d| d.as_array());
+    for agent in agents.into_iter().flatten() {
+        if let (Some(uuid), Some(icon)) = (
+            agent.get("uuid").and_then(|v| v.as_str()),
+            agent.get("displayIcon").and_then(|v| v.as_str()),
+        ) {
+            out.insert(uuid.to_string(), icon.to_string());
         }
     }
     out
@@ -133,7 +175,9 @@ pub async fn load_or_fetch(cache_dir: &Path) -> StaticData {
 
     StaticData {
         tiers: parse_tiers(&tiers_json),
+        tier_icons: parse_tier_icons(&tiers_json),
         agents: parse_agents(&agents_json),
+        agent_icons: parse_agent_icons(&agents_json),
         maps: parse_maps(&maps_json),
     }
 }
@@ -155,7 +199,7 @@ mod tests {
         let sd = StaticData {
             tiers: parse_tiers(&tiers),
             agents: parse_agents(&agents),
-            maps: HashMap::new(),
+            ..Default::default()
         };
         assert_eq!(sd.rank_name(21), "IMMORTAL 3");
         assert_eq!(sd.rank_name(999), "Unranked");

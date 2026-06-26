@@ -4,14 +4,18 @@ export interface PlayerRow {
   puuid: string;
   name: string;
   agent: string;
+  agentIcon: string;
   team: string;
   partyId: string;
   hiddenName: boolean;
   rankTier: number;
   rankName: string;
+  rankIcon: string;
   rr: number;
   peakRankName: string;
   peakRankTier: number;
+  winRate: number;
+  games: number;
   accountLevel: number;
 }
 

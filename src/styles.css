@@ -213,6 +213,25 @@ body {
   clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
 }
 
+.profile-emblem {
+  width: 104px;
+  height: 104px;
+  object-fit: contain;
+}
+
+.profile-rankname {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-top: -4px;
+}
+
+.profile-stats .dim {
+  color: var(--muted);
+  font-weight: 400;
+}
+
 .profile-stats {
   display: flex;
   gap: 18px;
@@ -314,13 +333,39 @@ body {
 /* Player row */
 .prow {
   display: grid;
-  grid-template-columns: 4px 86px 1fr auto;
+  grid-template-columns: 4px 32px auto 1fr auto;
   align-items: center;
   gap: 9px;
   padding: 7px 9px 7px 5px;
   background: var(--panel);
   border: 1px solid #171b22;
   border-radius: 7px;
+}
+
+.agent-ico {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  object-fit: cover;
+  background: #1a1e26;
+}
+
+.agent-ico.empty {
+  background: #161a22;
+}
+
+.rank-ico {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+
+.rank-ico-fallback {
+  width: 16px;
+  height: 16px;
+  margin: 0 10px;
+  border-radius: 50%;
+  opacity: 0.7;
 }
 
 .party {

@@ -14,14 +14,18 @@ pub struct PlayerRow {
     pub puuid: String,
     pub name: String,
     pub agent: String,
+    pub agent_icon: String,
     pub team: String,
     pub party_id: String,
     pub hidden_name: bool,
     pub rank_tier: u32,
     pub rank_name: String,
+    pub rank_icon: String,
     pub rr: u32,
     pub peak_rank_name: String,
     pub peak_rank_tier: u32,
+    pub win_rate: u32,
+    pub games: u32,
     pub account_level: u32,
 }
 
