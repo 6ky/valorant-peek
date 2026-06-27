@@ -69,6 +69,11 @@ Or download the `Peek_x.x.x_x64-setup.exe` from the
   <img src=".github/screenshots/idle.png" width="900" alt="Peek idle profile and recent history" />
 </div>
 
+<div align="center">
+  <img src=".github/screenshots/demo.gif" width="240" alt="Agent select lock-in" />
+  <p><i>Agent select, live: an ally previews on hover, then locks in.</i></p>
+</div>
+
 ## Per player
 
 - Current rank and RR, plus leaderboard rank for Immortal and Radiant
