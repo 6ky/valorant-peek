@@ -12,6 +12,8 @@
     <img src="https://img.shields.io/badge/platform-Windows-0a0a0a?style=flat-square" alt="Windows" />
     <img src="https://img.shields.io/badge/built%20with-Tauri%20%2B%20Rust-0a0a0a?style=flat-square" alt="Tauri and Rust" />
   </p>
+
+  <img src=".github/screenshots/match.png" width="900" alt="Peek live match roster" />
 </div>
 
 ---
