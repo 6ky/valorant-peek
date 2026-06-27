@@ -122,7 +122,7 @@ export function PlayerTable({
         <div className="rows" style={dmRows}>
           {byRank(players).map((p) => (
             <PlayerRow key={p.puuid} row={p} isEnemy={false} avgTier={avgTier}
-            combatLoading={combatLoading} dm picking={false} selecting={false} />
+            combatLoading={combatLoading} dm picking={pregame && !p.locked} selecting={pregame} />
           ))}
         </div>
       </div>

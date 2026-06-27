@@ -539,11 +539,22 @@ body {
   height: 100%;
   object-fit: cover;
 }
-/* Hovering an agent in select: tile dims. The img is keyed on its url, so a
-   pick change remounts it and plays the cross-fade. */
+/* Hovering an agent in select: the tile breathes so it reads clearly as a
+   not-yet-locked pick. The img is keyed on its url, so a pick change remounts it
+   and plays the cross-fade. */
 .agent.hovering {
-  opacity: 0.42;
-  border-color: var(--line);
+  opacity: 0.5;
+  border-color: var(--amber);
+  border-style: dashed;
+}
+@keyframes hoverpulse {
+  0%,
+  100% {
+    opacity: 0.32;
+  }
+  50% {
+    opacity: 0.72;
+  }
 }
 .agent img {
   animation: agentin 0.22s ease;
@@ -1006,6 +1017,9 @@ body {
 }
 .prank .l2 .mono {
   color: var(--dim);
+}
+.prank .l2 .eta {
+  color: var(--amber);
 }
 
 .psum {

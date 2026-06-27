@@ -107,6 +107,15 @@ export function ProfileCard({ me, history }: { me: PlayerRow; history: HistoryEn
   // approximate against 100 RR per division.
   // TODO: real next-rank threshold needs backend support.
   const rrClamped = Math.max(0, Math.min(100, me.rr));
+  const rrToGo = ranked ? Math.max(0, 100 - me.rr) : 0;
+  // Rough wins-to-rank-up from the average RR gained on recent winning games,
+  // assuming you win out. Only meaningful below Immortal, where 100 RR promotes.
+  const recentWins = history.filter((h) => h.rrChange > 0);
+  const avgWinGain =
+    recentWins.length > 0
+      ? recentWins.reduce((s, h) => s + h.rrChange, 0) / recentWins.length
+      : 0;
+  const winsToGo = rrToGo > 0 && avgWinGain > 0 ? Math.ceil(rrToGo / avgWinGain) : null;
 
   return (
     <div className="profile">
@@ -153,7 +162,12 @@ export function ProfileCard({ me, history }: { me: PlayerRow; history: HistoryEn
         </div>
         <div className="l2">
           <span>Rating progress</span>
-          <span className="mono">{Math.max(0, 100 - me.rr)} RR to go</span>
+          <span className="mono">
+            {rrToGo} RR to go
+            {winsToGo !== null && (
+              <span className="eta"> &middot; ~{winsToGo} {winsToGo === 1 ? "win" : "wins"}</span>
+            )}
+          </span>
         </div>
       </div>
 
