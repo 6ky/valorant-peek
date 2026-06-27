@@ -413,20 +413,24 @@ body {
 }
 .prow .cardbg {
   position: absolute;
-  inset: 0;
+  inset: 0 auto 0 0;
+  width: 48%;
   z-index: 0;
   pointer-events: none;
-  opacity: 0.06;
-  -webkit-mask-image: linear-gradient(90deg, #000 0%, transparent 55%);
-  mask-image: linear-gradient(90deg, #000 0%, transparent 55%);
+  opacity: 0.34;
+  -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 28%, transparent 100%);
+  mask-image: linear-gradient(90deg, #000 0%, #000 28%, transparent 100%);
 }
 .prow .cardbg img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: left center;
 }
+/* Agent select: an un-locked ally is muted but their rank and stats stay
+   readable, with the strong hover/lock signal carried on the agent tile. */
 .prow.picking {
-  opacity: 0.5;
+  opacity: 0.8;
 }
 .prow .cell {
   padding: 0 6px;
@@ -439,6 +443,22 @@ body {
   font-family: "IBM Plex Mono";
   font-size: 13px;
   font-weight: 500;
+}
+/* One small spinner per row while that player's combat stats are still loading. */
+.stat-spin {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--line-2);
+  border-top-color: var(--amber);
+  border-radius: 50%;
+  vertical-align: middle;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .prow .num .u {
   font-size: 8.5px;
@@ -471,6 +491,7 @@ body {
   overflow: hidden;
   border: 1px solid var(--line-2);
   background: var(--raise);
+  transition: opacity 0.18s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 .agent .mg {
   font-family: "IBM Plex Mono";
@@ -484,6 +505,42 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+/* Hovering an agent in select: tile dims. The img is keyed on its url, so a
+   pick change remounts it and plays the cross-fade. */
+.agent.hovering {
+  opacity: 0.42;
+  border-color: var(--line);
+}
+.agent img {
+  animation: agentin 0.22s ease;
+}
+@keyframes agentin {
+  from {
+    opacity: 0;
+    transform: scale(1.12);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+/* Lock-in: tile snaps to full and pulses an amber ring once. */
+.agent.locked {
+  opacity: 1;
+  border-color: var(--amber);
+  animation: lockpop 0.28s ease;
+}
+@keyframes lockpop {
+  0% {
+    box-shadow: 0 0 0 0 rgba(202, 160, 92, 0);
+  }
+  45% {
+    box-shadow: 0 0 0 2px rgba(202, 160, 92, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(202, 160, 92, 0);
+  }
 }
 
 .pid {

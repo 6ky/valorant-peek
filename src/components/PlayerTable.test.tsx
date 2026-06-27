@@ -27,7 +27,11 @@ const rows: PlayerRow[] = [
     accountLevel: 120,
     lastKills: 20,
     lastDeaths: 14,
+    lastAssists: 5,
     lastHs: 25,
+    lastAcs: 240,
+    lastAdr: 155,
+    lastKast: 72,
     hasCombat: true,
     streak: 0,
     rrTrend: 0,
@@ -48,7 +52,7 @@ const rows: PlayerRow[] = [
 
 test("renders a player's name and rank", () => {
   // The design splits "Name#Tag" into a name span and a dim tag span.
-  const { container } = render(<PlayerTable players={rows} state="CoreGame" />);
+  const { container } = render(<PlayerTable players={rows} state="CoreGame" combatLoading={false} />);
   expect(container.querySelector(".pid .name")?.textContent).toBe("Ace#NA1");
   expect(screen.getByText("Immortal 3")).toBeInTheDocument();
 });
@@ -58,7 +62,7 @@ test("sorts higher rank first within a team", () => {
     { ...rows[0], puuid: "low", name: "Low#1", rankTier: 10, rankName: "Gold 1" },
     { ...rows[0], puuid: "high", name: "High#1", rankTier: 24, rankName: "Radiant" },
   ];
-  const { container } = render(<PlayerTable players={two} state="CoreGame" />);
+  const { container } = render(<PlayerTable players={two} state="CoreGame" combatLoading={false} />);
   const names = Array.from(container.querySelectorAll(".pid .name")).map((el) => el.textContent);
   expect(names[0]).toBe("High#1");
 });

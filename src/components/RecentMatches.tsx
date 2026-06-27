@@ -3,16 +3,12 @@ import { divColor, kdOf } from "../design";
 
 const MAX = 15;
 
-function dropImg(e: React.SyntheticEvent<HTMLImageElement>) {
-  e.currentTarget.remove();
-}
-
 function MapThumb({ map, image }: { map: string; image: string }) {
   const ab = (map || "MAP").slice(0, 3).toUpperCase();
   return (
     <span className="mthumb">
       <span className="ab">{ab}</span>
-      {image && <img src={image} alt="" onError={dropImg} />}
+      {image && <img src={image} alt="" />}
     </span>
   );
 }

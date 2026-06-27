@@ -2,10 +2,6 @@ import { useEffect, useState } from "react";
 import { MatchView } from "../types";
 import { PlayerTable } from "./PlayerTable";
 
-function dropImg(e: React.SyntheticEvent<HTMLImageElement>) {
-  e.currentTarget.remove();
-}
-
 // m:ss countdown text.
 function fmtTime(s: number): string {
   const m = Math.floor(s / 60);
@@ -43,7 +39,7 @@ export function MatchScreen({ view }: { view: MatchView }) {
           <b>{view.mode || "Match"}</b>
         </div>
         {view.mapImage && (
-          <img className="ctxmap" src={view.mapImage} alt="" onError={dropImg} />
+          <img className="ctxmap" src={view.mapImage} alt="" />
         )}
         {view.map && <span className="map">{view.map}</span>}
         {showScore && (
@@ -61,7 +57,7 @@ export function MatchScreen({ view }: { view: MatchView }) {
           </span>
         )}
       </div>
-      <PlayerTable players={view.players} state={view.state} />
+      <PlayerTable players={view.players} state={view.state} combatLoading={view.combatLoading} />
     </div>
   );
 }

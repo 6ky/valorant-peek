@@ -90,7 +90,15 @@ function Compare({ ally, enemy }: { ally: Row[]; enemy: Row[] }) {
   );
 }
 
-export function PlayerTable({ players, state }: { players: Row[]; state: MatchState }) {
+export function PlayerTable({
+  players,
+  state,
+  combatLoading,
+}: {
+  players: Row[];
+  state: MatchState;
+  combatLoading: boolean;
+}) {
   // Agent select dims allies who have not locked in yet; in CoreGame the lock
   // flag is meaningless, so the picking treatment is suppressed.
   const pregame = state === "PreGame";
@@ -115,7 +123,8 @@ export function PlayerTable({ players, state }: { players: Row[]; state: MatchSt
         <ColumnHeader />
         <div className="rows" style={dmRows}>
           {byRank(players).map((p) => (
-            <PlayerRow key={p.puuid} row={p} isEnemy={false} avgTier={avgTier} dm picking={false} />
+            <PlayerRow key={p.puuid} row={p} isEnemy={false} avgTier={avgTier}
+            combatLoading={combatLoading} dm picking={false} selecting={false} />
           ))}
         </div>
       </div>
@@ -138,8 +147,10 @@ export function PlayerTable({ players, state }: { players: Row[]; state: MatchSt
             row={p}
             isEnemy={false}
             avgTier={avgTier}
+            combatLoading={combatLoading}
             dm={false}
             picking={pregame && !p.locked}
+            selecting={pregame}
           />
         ))}
       </div>
@@ -152,7 +163,8 @@ export function PlayerTable({ players, state }: { players: Row[]; state: MatchSt
       />
       <div className="rows">
         {byRank(enemy).map((p) => (
-          <PlayerRow key={p.puuid} row={p} isEnemy avgTier={avgTier} dm={false} picking={false} />
+          <PlayerRow key={p.puuid} row={p} isEnemy avgTier={avgTier}
+            combatLoading={combatLoading} dm={false} picking={false} selecting={false} />
         ))}
       </div>
     </div>

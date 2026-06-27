@@ -26,18 +26,31 @@ function splitName(row: Row): { name: string; tag: string } {
   return { name: row.name.slice(0, i), tag: row.name.slice(i) };
 }
 
-function dropImg(e: React.SyntheticEvent<HTMLImageElement>) {
-  e.currentTarget.remove();
-}
-
-function AgentTile({ agent, icon }: { agent: string; icon: string }) {
+// During agent select an ally is either hovering an agent (dimmed) or locked in
+// (full, with a brief lock-in pulse). Keying the img on the icon url remounts it
+// when the pick changes, so switching hover Reyna -> Clove cross-fades. Outside
+// agent select (selecting=false) the tile renders plain.
+function AgentTile({
+  agent,
+  icon,
+  selecting,
+  locked,
+}: {
+  agent: string;
+  icon: string;
+  selecting: boolean;
+  locked: boolean;
+}) {
   const meta = agentMeta(agent);
+  const cls = ["agent", selecting && !locked ? "hovering" : "", selecting && locked ? "locked" : ""]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <span className="agent">
+    <span className={cls}>
       <span className="mg" style={{ color: meta.color }}>
         {meta.mono}
       </span>
-      {icon && <img src={icon} alt="" onError={dropImg} />}
+      {icon && <img key={icon} src={icon} alt="" />}
     </span>
   );
 }
@@ -48,7 +61,7 @@ function Emblem({ tier, icon, className }: { tier: number; icon: string; classNa
   return (
     <span className={`emb${className ? ` ${className}` : ""}`}>
       {icon ? (
-        <img src={icon} alt="" onError={dropImg} />
+        <img src={icon} alt="" />
       ) : (
         <span className="chip" style={{ background: divColor(tier) }} />
       )}
@@ -62,15 +75,22 @@ export function PlayerRow({
   avgTier,
   dm,
   picking,
+  selecting,
+  combatLoading,
 }: {
   row: Row;
   isEnemy: boolean;
   avgTier: number;
   dm: boolean;
   picking: boolean;
+  selecting: boolean;
+  combatLoading: boolean;
 }) {
   const { name, tag } = splitName(row);
   const ranked = row.rankTier > 0;
+  // Combat stats arrive in a second pass; show one spinner per player while this
+  // row is still pending, rather than a dot in each stat field.
+  const loadingCombat = combatLoading && !row.hasCombat;
   const kd = kdOf(row.lastKills, row.lastDeaths);
   const isSmurf = row.smurfScore >= SMURF_THRESHOLD;
   const danger = isSmurf || (isEnemy && row.hasCombat && kd >= DANGER_KD);
@@ -98,12 +118,12 @@ export function PlayerRow({
     <div className={cls} style={style}>
       {row.playerCard && (
         <span className="cardbg">
-          <img src={row.playerCard} alt="" onError={dropImg} />
+          <img src={row.playerCard} alt="" />
         </span>
       )}
       <div />
       <div className="cell">
-        <AgentTile agent={row.agent} icon={row.agentIcon} />
+        <AgentTile agent={row.agent} icon={row.agentIcon} selecting={selecting} locked={row.locked} />
       </div>
 
       <div className="cell pid">
@@ -149,7 +169,7 @@ export function PlayerRow({
               className="skinthumb"
               style={row.vandalTierColor ? ({ "--ed": row.vandalTierColor } as CSSProperties) : undefined}
             >
-              {row.vandalImage && <img src={row.vandalImage} alt="" onError={dropImg} />}
+              {row.vandalImage && <img src={row.vandalImage} alt="" />}
             </span>
             <span className="skname">{row.vandalSkin}</span>
           </>
@@ -177,31 +197,42 @@ export function PlayerRow({
         )}
       </div>
 
-      <div className={`cell num ${row.hasCombat ? tone(kd, 0.85, 1.3, isEnemy) : "tone-neutral"}`}>
-        {row.hasCombat ? kd.toFixed(2) : <span className="faint">&middot;</span>}
-      </div>
-
-      <div className="cell num tone-neutral">
-        {row.hasCombat ? (
-          <>
-            {row.lastHs}
-            <span className="u">%</span>
-          </>
-        ) : (
-          <span className="faint">&middot;</span>
-        )}
-      </div>
-
-      <div className={`cell num ${row.games > 0 ? tone(row.winRate, 45, 55, isEnemy) : "tone-neutral"}`}>
-        {row.games > 0 ? (
-          <>
-            {row.winRate}
-            <span className="u">%</span>
-            <div className="sub">{row.games} gp</div>
-          </>
-        ) : (
-          <span className="faint">&middot;</span>
-        )}
+      {/* Performance capsule: recent ACS/ADR/KAST over K/D/HS/WR in a 2x3 mono
+          grid rather than six columns. ACS leads as the headline number and
+          carries the single per-row loading spinner while combat streams in. */}
+      <div className="cell form">
+        <div className="caps">
+          <span className={`s ${row.hasCombat ? tone(row.lastAcs, 180, 240, isEnemy) : "tone-neutral"}`}>
+            <i>ACS</i>
+            {row.hasCombat ? (
+              row.lastAcs
+            ) : loadingCombat ? (
+              <span className="stat-spin" />
+            ) : (
+              <em>&middot;</em>
+            )}
+          </span>
+          <span className={`s ${row.hasCombat ? tone(row.lastAdr, 125, 165, isEnemy) : "tone-neutral"}`}>
+            <i>ADR</i>
+            {row.hasCombat ? row.lastAdr : <em>&middot;</em>}
+          </span>
+          <span className={`s ${row.hasCombat ? tone(row.lastKast, 60, 72, isEnemy) : "tone-neutral"}`}>
+            <i>KAST</i>
+            {row.hasCombat ? `${row.lastKast}%` : <em>&middot;</em>}
+          </span>
+          <span className={`s ${row.hasCombat ? tone(kd, 0.85, 1.3, isEnemy) : "tone-neutral"}`}>
+            <i>K/D</i>
+            {row.hasCombat ? kd.toFixed(2) : <em>&middot;</em>}
+          </span>
+          <span className="s">
+            <i>HS</i>
+            {row.hasCombat ? `${row.lastHs}%` : <em>&middot;</em>}
+          </span>
+          <span className={`s ${row.games > 0 ? tone(row.winRate, 45, 55, isEnemy) : "tone-neutral"}`}>
+            <i>WR</i>
+            {row.games > 0 ? `${row.winRate}%` : <em>&middot;</em>}
+          </span>
+        </div>
       </div>
 
       <div className="cell peak">

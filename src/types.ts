@@ -24,7 +24,11 @@ export interface PlayerRow {
   accountLevel: number;
   lastKills: number;
   lastDeaths: number;
+  lastAssists: number;
   lastHs: number;
+  lastAcs: number;
+  lastAdr: number;
+  lastKast: number;
   hasCombat: boolean;
   streak: number;
   rrTrend: number;

@@ -112,11 +112,11 @@ export function ProfileCard({ me, history }: { me: PlayerRow; history: HistoryEn
     <div className="profile">
       <div className="banner">
         <div className="slot">
-          {me.playerCard && <img src={me.playerCard} alt="" onError={(e) => e.currentTarget.remove()} />}
+          {me.playerCard && <img src={me.playerCard} alt="" />}
         </div>
         <span className="emb bigemb">
           {ranked && me.rankIcon ? (
-            <img src={me.rankIcon} alt="" onError={(e) => e.currentTarget.remove()} />
+            <img src={me.rankIcon} alt="" />
           ) : (
             <span className="chip" style={{ background: color }} />
           )}
@@ -136,7 +136,7 @@ export function ProfileCard({ me, history }: { me: PlayerRow; history: HistoryEn
           <span className="rkname">
             <span className="emb">
               {ranked && me.rankIcon ? (
-                <img src={me.rankIcon} alt="" onError={(e) => e.currentTarget.remove()} />
+                <img src={me.rankIcon} alt="" />
               ) : (
                 <span className="chip" style={{ background: color }} />
               )}
@@ -207,7 +207,7 @@ export function ProfileCard({ me, history }: { me: PlayerRow; history: HistoryEn
             return (
               <div className="agrow" key={a.name}>
                 <span className="agent">
-                  {a.icon && <img src={a.icon} alt="" onError={(e) => e.currentTarget.remove()} />}
+                  {a.icon && <img src={a.icon} alt="" />}
                 </span>
                 <div className="mid">
                   <div className="nm">
@@ -232,7 +232,7 @@ export function ProfileCard({ me, history }: { me: PlayerRow; history: HistoryEn
         <div className="ppeak">
           <span className="emb">
             {me.peakRankIcon ? (
-              <img src={me.peakRankIcon} alt="" onError={(e) => e.currentTarget.remove()} />
+              <img src={me.peakRankIcon} alt="" />
             ) : (
               <span className="chip" style={{ background: divColor(me.peakRankTier) }} />
             )}
