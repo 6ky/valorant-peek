@@ -3,6 +3,15 @@
   <h1>Peek</h1>
   <p><b>Peek the lobby before you peek the angle.</b></p>
   <p>A fast, lightweight VALORANT match companion. See who you are playing with and against, the moment the match loads.</p>
+
+  <p>
+    <a href="https://github.com/6ky/valorant-peek/releases/latest"><img src="https://img.shields.io/github/v/release/6ky/valorant-peek?style=flat-square&color=ff4655&label=release" alt="Latest release" /></a>
+    <a href="https://github.com/6ky/valorant-peek/releases"><img src="https://img.shields.io/github/downloads/6ky/valorant-peek/total?style=flat-square&color=ff4655&label=downloads" alt="Downloads" /></a>
+    <a href="https://github.com/6ky/valorant-peek/stargazers"><img src="https://img.shields.io/github/stars/6ky/valorant-peek?style=flat-square&color=ff4655" alt="Stars" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/6ky/valorant-peek?style=flat-square&color=ff4655" alt="License" /></a>
+    <img src="https://img.shields.io/badge/platform-Windows-0a0a0a?style=flat-square" alt="Windows" />
+    <img src="https://img.shields.io/badge/built%20with-Tauri%20%2B%20Rust-0a0a0a?style=flat-square" alt="Tauri and Rust" />
+  </p>
 </div>
 
 ---
@@ -12,6 +21,28 @@ a small window you keep on a second monitor or alt-tab to. It is built to be
 light and reliable: it runs as its own window (no in-game overlay, no effect on
 your FPS) and reads straight from your own running Riot client, so it does not
 depend on any third-party website staying up.
+
+## Why Peek
+
+- **Ban-safe by design.** Read only. It talks only to your own local Riot client
+  and to Riot's public endpoints. No memory reads, no injection, no overlay.
+- **Zero FPS impact.** A separate native window, not an in-game overlay.
+- **Deep recent form.** ACS, ADR, KAST, K/D, headshot percent and win rate per
+  player, not just a rank badge.
+- **Premade detection.** Exact ally parties from presence, plus inferred enemy
+  stacks from match history.
+- **Encounter memory.** It remembers everyone you have played with or against,
+  and your record with them, built up locally over time.
+- **Tiny and native.** A roughly 3 MB Rust app, not a browser tab.
+
+|                                          | Peek | Typical web tracker |
+| ---------------------------------------- | :--: | :-----------------: |
+| Runs off your own client, no outside site |  yes  |         no          |
+| No overlay, zero FPS hit                  |  yes  |       varies        |
+| ACS / ADR / KAST recent form             |  yes  |      sometimes      |
+| Ally and inferred enemy premades         |  yes  |       rarely        |
+| Local encounter history                  |  yes  |         no          |
+| Native desktop app                       |  yes  |         no          |
 
 ## Install
 
@@ -37,7 +68,7 @@ Or download the `Peek_x.x.x_x64-setup.exe` from the
 - Current rank and RR, plus leaderboard rank for Immortal and Radiant
 - Peak rank and the act it was reached
 - Act win rate and games played
-- Last match K/D and headshot percent (optional, off by toggle)
+- Recent ACS, ADR, KAST, K/D and headshot percent over the last games (optional)
 - Win or loss streak and RR trend over recent games
 - Smurf read, a single score from level, rank, games, win rate, and skins
 - Party and premade grouping with stack size
@@ -53,7 +84,8 @@ reads at a glance.
 
 Competitive, Unrated, Swiftplay, Spike Rush, Deathmatch, Team Deathmatch,
 Escalation, Replication, Snowball, and Custom. Competitive versus free-for-all
-layout is detected automatically.
+layout is detected automatically. The recent matches list has a Competitive /
+Unrated / All toggle.
 
 ## Safety
 
@@ -102,8 +134,7 @@ Open the gear in the title bar to set:
 - **Close button**: ask each time, minimize to tray, or quit
 - **Always on top**
 - **Discord Rich Presence** on or off
-- **Lobby K/D and headshot percent**: fetches each player's last match when a
-  game loads, one request per player at match start
+- **Lobby combat stats**: fetches each player's recent games when a match loads
 
 ## Region
 
@@ -131,7 +162,12 @@ Common regions: `na`, `eu`, `ap`, `kr`, `br`, `latam`.
 
 Tauri 2, Rust backend, React and TypeScript frontend. IBM Plex for type.
 
-## Disclaimer
+## Star it
 
-Peek is not affiliated with or endorsed by Riot Games. VALORANT and all related
-art and trademarks are property of Riot Games, Inc. Use at your own risk.
+If Peek saves you a dodge or two, a star helps other players find it.
+
+## License
+
+[MIT](LICENSE). Peek is not affiliated with or endorsed by Riot Games. VALORANT
+and all related art and trademarks are property of Riot Games, Inc. Use at your
+own risk.
