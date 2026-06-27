@@ -1,7 +1,16 @@
+import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { HistoryEntry } from "../types";
-import { divColor, kdOf } from "../design";
+import { divColor } from "../design";
 
 const MAX = 15;
+
+// Recent-matches queue: index matches the backend's history_queue values.
+const QUEUES = [
+  { id: 0, label: "Competitive" },
+  { id: 1, label: "Unrated" },
+  { id: 2, label: "All" },
+];
 
 function MapThumb({ map, image }: { map: string; image: string }) {
   const ab = (map || "MAP").slice(0, 3).toUpperCase();
@@ -13,10 +22,30 @@ function MapThumb({ map, image }: { map: string; image: string }) {
   );
 }
 
-export function RecentMatches({ history }: { history: HistoryEntry[] }) {
-  if (history.length === 0) return null;
+export function RecentMatches({
+  history,
+  historyQueue,
+}: {
+  history: HistoryEntry[];
+  historyQueue: number;
+}) {
+  const [queue, setQueue] = useState<number>(() => {
+    const v = Number(localStorage.getItem("peek.historyQueue"));
+    return v === 1 || v === 2 ? v : 0;
+  });
 
+  function pick(q: number) {
+    setQueue(q);
+    localStorage.setItem("peek.historyQueue", String(q));
+    invoke("set_history_queue", { queue: q });
+  }
+
+  // The list still belongs to the previous queue until the backend refetches,
+  // so show a loading state rather than the stale or empty list in between.
+  const loading = queue !== historyQueue;
   const shown = history.slice(0, MAX);
+  // RR only exists for competitive; the other queues come from match history.
+  const showRr = queue === 0;
   let wins = 0;
   let losses = 0;
   let net = 0;
@@ -31,72 +60,97 @@ export function RecentMatches({ history }: { history: HistoryEntry[] }) {
   return (
     <div className="matches">
       <div className="mhdr">
-        <h3>Recent Competitive</h3>
-        <span className="sm">
-          <span className="gp">{wins}W</span> <span className="lp">{losses}L</span> &middot;{" "}
-          {net > 0 ? "+" : ""}
-          {net} RR
-        </span>
-        <div className="form">
-          {form.map((h, i) => {
-            const won = h.hasStats ? h.won : h.rrChange >= 0;
-            return <i key={i} className={won ? "w" : "l"} />;
-          })}
+        <div className="mseg">
+          {QUEUES.map((q) => (
+            <button
+              key={q.id}
+              className={queue === q.id ? "on" : ""}
+              onClick={() => pick(q.id)}
+            >
+              {q.label}
+            </button>
+          ))}
         </div>
+        {!loading && shown.length > 0 && (
+          <span className="sm">
+            <span className="gp">{wins}W</span> <span className="lp">{losses}L</span>
+            {showRr && (
+              <>
+                {" "}
+                &middot; {net > 0 ? "+" : ""}
+                {net} RR
+              </>
+            )}
+          </span>
+        )}
+        {!loading && (
+          <div className="form">
+            {form.map((h, i) => {
+              const won = h.hasStats ? h.won : h.rrChange >= 0;
+              return <i key={i} className={won ? "w" : "l"} />;
+            })}
+          </div>
+        )}
       </div>
 
       <div className="mlist">
-        {shown.map((h, i) => {
-          const won = h.hasStats ? h.won : h.rrChange >= 0;
-          const kd = kdOf(h.kills, h.deaths);
-          return (
-            <div key={i} className={`mrow ${won ? "win" : "loss"}`} style={{ animationDelay: `${i * 42}ms` }}>
-              <div className="acc" />
-              <div className="cell">
-                <MapThumb map={h.map} image={h.mapImage} />
-              </div>
-              <div className="cell">
-                <div className="mp">{h.map || "Match"}</div>
-                {/* TODO: per-match mode and timestamp are not in history; show
-                    the rank at the time instead. */}
-                <div className="mt" style={{ color: divColor(h.tier) }}>
-                  {h.rankName || "Competitive"}
+        {loading ? (
+          <div className="mempty">Loading {QUEUES[queue].label}...</div>
+        ) : shown.length === 0 ? (
+          <div className="mempty">No recent games in this mode</div>
+        ) : (
+          shown.map((h, i) => {
+            const won = h.hasStats ? h.won : h.rrChange >= 0;
+            return (
+              <div key={i} className={`mrow ${won ? "win" : "loss"}`} style={{ animationDelay: `${i * 42}ms` }}>
+                <div className="acc" />
+                <div className="cell">
+                  <MapThumb map={h.map} image={h.mapImage} />
+                </div>
+                <div className="cell">
+                  <div className="mp">{h.map || "Match"}</div>
+                  <div className="mt" style={{ color: divColor(h.tier) }}>
+                    {h.rankName || "Match"}
+                  </div>
+                </div>
+                <div className="cell">
+                  <div className="res">{won ? "WIN" : "LOSS"}</div>
+                  {h.hasStats && (
+                    <div className="sc">
+                      {h.selfRounds}-{h.enemyRounds}
+                    </div>
+                  )}
+                </div>
+                <div className="cell">
+                  <span className="agent">
+                    {h.agentIcon && <img src={h.agentIcon} alt="" onError={(e) => e.currentTarget.remove()} />}
+                  </span>
+                </div>
+                <div className="cell">
+                  {h.hasStats ? (
+                    <div className="kda">
+                      {h.kills}
+                      <span className="s">/</span>
+                      {h.deaths}
+                      <span className="s">/</span>
+                      {h.assists}
+                      {h.acs > 0 && (
+                        <span className="small">
+                          {h.acs} ACS &middot; {h.adr} ADR &middot; {h.kast}% KAST &middot; {h.hs}% HS
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="kda faint">&middot;</div>
+                  )}
+                </div>
+                <div className="cell rrc">
+                  {h.ranked ? `${h.rrChange > 0 ? "+" : ""}${h.rrChange}` : ""}
                 </div>
               </div>
-              <div className="cell">
-                <div className="res">{won ? "WIN" : "LOSS"}</div>
-                {h.hasStats && (
-                  <div className="sc">
-                    {h.selfRounds}-{h.enemyRounds}
-                  </div>
-                )}
-              </div>
-              <div className="cell">
-                <span className="agent">
-                  {h.agentIcon && <img src={h.agentIcon} alt="" onError={(e) => e.currentTarget.remove()} />}
-                </span>
-              </div>
-              <div className="cell">
-                {h.hasStats ? (
-                  <div className="kda">
-                    {h.kills}
-                    <span className="s">/</span>
-                    {h.deaths}
-                    <span className="s">/</span>
-                    {h.assists}
-                    <span className="small">{h.hs}% HS &middot; {kd.toFixed(2)} KD</span>
-                  </div>
-                ) : (
-                  <div className="kda faint">&middot;</div>
-                )}
-              </div>
-              <div className="cell rrc">
-                {h.rrChange > 0 ? "+" : ""}
-                {h.rrChange}
-              </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
     </div>
   );

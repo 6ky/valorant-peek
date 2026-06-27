@@ -351,7 +351,7 @@ body {
 .colhdr,
 .prow {
   display: grid;
-  grid-template-columns: 3px 34px minmax(140px, 1.2fr) 184px 120px 48px 50px 46px 82px 140px;
+  grid-template-columns: 3px 34px 206px 192px 132px 40px 224px minmax(150px, 1fr);
   align-items: center;
 }
 .colhdr {
@@ -414,7 +414,7 @@ body {
 .prow .cardbg {
   position: absolute;
   inset: 0 auto 0 0;
-  width: 48%;
+  width: 38%;
   z-index: 0;
   pointer-events: none;
   opacity: 0.34;
@@ -468,6 +468,39 @@ body {
 .prow .sub {
   font-family: "IBM Plex Mono";
   font-size: 9px;
+  color: var(--faint);
+}
+/* Performance capsule: six recent-form stats in a 2x3 mono grid where three
+   columns used to sit, so the row carries ACS/ADR/KAST/KD/HS/WR without
+   crowding. ACS leads (bold) and holds the loading spinner. */
+.prow .caps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px 12px;
+  font-family: "IBM Plex Mono";
+  font-variant-numeric: tabular-nums;
+}
+.prow .caps .s {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.prow .caps .s:first-child {
+  font-weight: 600;
+}
+.prow .caps .s i {
+  font-style: normal;
+  font-size: 7.5px;
+  letter-spacing: 0.04em;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+.prow .caps .s em {
+  font-style: normal;
   color: var(--faint);
 }
 .tone-good {
@@ -563,7 +596,7 @@ body {
   text-overflow: ellipsis;
 }
 .pid .ttag {
-  color: var(--faint);
+  color: var(--dim);
   font-weight: 400;
 }
 .pid .bot {
@@ -1176,6 +1209,41 @@ body {
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
+/* Queue toggle for the recent-matches list. */
+.mseg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.mseg button {
+  font-family: "IBM Plex Sans Condensed";
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+  background: transparent;
+  border: none;
+  padding: 5px 11px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.mseg button:hover {
+  color: var(--txt);
+  background: var(--panel-2);
+}
+.mseg button.on {
+  color: var(--bg);
+  background: var(--amber);
+}
+.mempty {
+  font-family: "IBM Plex Mono";
+  font-size: 11px;
+  color: var(--faint);
+  padding: 20px 6px;
+  text-align: center;
+}
 .mhdr .sm {
   font-family: "IBM Plex Mono";
   font-size: 10px;
@@ -1215,7 +1283,7 @@ body {
 .mrow {
   position: relative;
   display: grid;
-  grid-template-columns: 3px 54px minmax(110px, 1.3fr) 64px 34px 132px 70px;
+  grid-template-columns: 3px 54px minmax(110px, 1fr) 64px 34px 196px 70px;
   align-items: center;
   min-height: 52px;
   border-radius: 6px;

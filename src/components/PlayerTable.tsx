@@ -28,9 +28,7 @@ function ColumnHeader() {
       <span>Vandal</span>
       <span>Rank</span>
       <span className="r">RR</span>
-      <span className="r">K/D</span>
-      <span className="r">HS%</span>
-      <span className="r">Win%</span>
+      <span>Recent form</span>
       <span>Peak</span>
     </div>
   );

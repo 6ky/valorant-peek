@@ -10,7 +10,6 @@ pub struct RawPlayer {
     pub character_id: String,
     pub account_level: u32,
     pub incognito: bool,
-    pub hide_level: bool,
     pub player_card_id: String,
     // Agent select only: true once the player has locked their agent. Absent
     // in coregame, where it defaults to false.
@@ -51,7 +50,6 @@ pub fn parse_match_players(json: &Value) -> Vec<RawPlayer> {
                 character_id: s("CharacterID"),
                 account_level: id_u64("AccountLevel") as u32,
                 incognito: id_bool("Incognito"),
-                hide_level: id_bool("HideAccountLevel"),
                 player_card_id: id_str("PlayerCardID"),
                 locked: s("CharacterSelectionState") == "locked",
             }

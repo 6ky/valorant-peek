@@ -25,6 +25,7 @@ const INITIAL: MatchView = {
   allyScore: 0,
   enemyScore: 0,
   combatLoading: false,
+  historyQueue: 0,
 };
 
 const STATE_LABEL: Record<MatchState, string> = {
@@ -50,6 +51,8 @@ export default function App() {
     invoke("set_combat_enabled", {
       enabled: localStorage.getItem("peek.combat") !== "false",
     });
+    const hq = Number(localStorage.getItem("peek.historyQueue"));
+    invoke("set_history_queue", { queue: hq === 1 || hq === 2 ? hq : 0 });
     // The window starts hidden so the dark UI is painted before it appears,
     // avoiding a white flash. Reveal it on the next frame.
     requestAnimationFrame(() => win.show());
@@ -145,7 +148,7 @@ export default function App() {
       ) : showStandby ? (
         <StatusScreen state={view.state} history={view.history} />
       ) : (
-        <IdleScreen me={view.me} history={view.history} />
+        <IdleScreen me={view.me} history={view.history} historyQueue={view.historyQueue} />
       )}
 
       {askClose && (

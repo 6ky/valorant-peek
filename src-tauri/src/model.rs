@@ -95,10 +95,13 @@ pub struct HistoryEntry {
     pub deaths: u32,
     pub assists: u32,
     pub acs: u32,
+    pub adr: u32,
+    pub kast: u32,
     pub hs: u32,
     pub self_rounds: u32,
     pub enemy_rounds: u32,
     pub won: bool,
+    pub ranked: bool,
     pub has_stats: bool,
     pub scoreboard: Vec<ScoreEntry>,
 }
@@ -122,4 +125,8 @@ pub struct MatchView {
     pub enemy_score: u32,
     // True while the per-player combat stats are still filling in.
     pub combat_loading: bool,
+    // Which queue the recent-matches list was fetched for (0 competitive, 1
+    // unrated, 2 all), so the UI can show a loading state while a toggle is
+    // still being fetched.
+    pub history_queue: u8,
 }

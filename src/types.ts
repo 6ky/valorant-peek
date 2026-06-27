@@ -70,10 +70,13 @@ export interface HistoryEntry {
   deaths: number;
   assists: number;
   acs: number;
+  adr: number;
+  kast: number;
   hs: number;
   selfRounds: number;
   enemyRounds: number;
   won: boolean;
+  ranked: boolean;
   hasStats: boolean;
   scoreboard: ScoreEntry[];
 }
@@ -92,4 +95,5 @@ export interface MatchView {
   allyScore: number;
   enemyScore: number;
   combatLoading: boolean;
+  historyQueue: number;
 }

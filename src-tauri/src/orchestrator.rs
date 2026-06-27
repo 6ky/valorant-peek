@@ -13,7 +13,7 @@ use crate::model::{MatchState, MatchView, PlayerRow};
 use crate::presence::{describe_activity, fetch_self_presence, is_ffa, mode_name};
 use crate::static_cache::{load_or_fetch, StaticData};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
@@ -39,6 +39,7 @@ pub fn assemble_view(
         ally_score: 0,
         enemy_score: 0,
         combat_loading: false,
+        history_queue: 0,
     }
 }
 
@@ -83,6 +84,8 @@ async fn poll_once(
     combat_attempted: &mut HashSet<String>,
     mates_map: &mut HashMap<String, HashSet<String>>,
     fetch_combat: bool,
+    history_queue: u8,
+    force_history: bool,
 ) -> Option<MatchView> {
     let lf = match read_lockfile() {
         Ok(lf) => lf,
@@ -119,8 +122,14 @@ async fn poll_once(
     } else {
         last.me.clone()
     };
-    let history = if refresh_self {
-        let fresh = fetch_history(&ctx, region, &v, sd, match_cache).await;
+    // On an explicit mode switch, show the fetched list as-is even when it is
+    // empty, so a mode with no games reads as empty instead of keeping the
+    // previous mode's matches. On the periodic refresh, keep the last list on an
+    // empty result so a transient failure does not blank a populated table.
+    let history = if force_history {
+        fetch_history(&ctx, region, &v, sd, match_cache, history_queue).await
+    } else if refresh_self {
+        let fresh = fetch_history(&ctx, region, &v, sd, match_cache, history_queue).await;
         if fresh.is_empty() {
             last.history.clone()
         } else {
@@ -156,6 +165,7 @@ async fn poll_once(
         me: me.clone(),
         history: history.clone(),
         activity: activity.clone(),
+        history_queue,
         ..view
     };
 
@@ -303,6 +313,8 @@ pub async fn run_loop(
     app: AppHandle,
     rpc_enabled: Arc<AtomicBool>,
     combat_enabled: Arc<AtomicBool>,
+    history_queue: Arc<AtomicU8>,
+    wake: Arc<Notify>,
 ) {
     let base_dir = app
         .path()
@@ -328,14 +340,17 @@ pub async fn run_loop(
     let mut combat_done: Option<String> = None;
     let mut combat_attempted: HashSet<String> = HashSet::new();
     let mut mates_map: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut last_history_queue = history_queue.load(Ordering::Relaxed);
 
-    // Wake on presence changes from the local websocket, falling back to the
-    // poll interval below if the socket is unavailable.
-    let wake = Arc::new(Notify::new());
+    // Wake on presence changes from the local websocket (and on a mode-toggle
+    // command), falling back to the poll interval below if neither fires.
     tauri::async_runtime::spawn(crate::websocket::run_presence_socket(wake.clone()));
 
     loop {
         let combat_on = combat_enabled.load(Ordering::Relaxed);
+        let hq = history_queue.load(Ordering::Relaxed);
+        let force_history = hq != last_history_queue;
+        last_history_queue = hq;
         let view = match poll_once(
             &static_data,
             &region,
@@ -351,6 +366,8 @@ pub async fn run_loop(
             &mut combat_attempted,
             &mut mates_map,
             combat_on,
+            hq,
+            force_history,
         )
         .await
         {

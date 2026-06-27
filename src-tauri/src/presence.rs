@@ -85,6 +85,13 @@ pub fn is_ffa(queue_id: &str) -> bool {
     queue_id == "deathmatch"
 }
 
+/// Whether a mode is played in discrete rounds. Deathmatch, escalation, snowball
+/// and team deathmatch are score races with no real rounds, so per-round stats
+/// (ACS, ADR, KAST, headshot rate) are meaningless for them.
+pub fn has_rounds(queue_id: &str) -> bool {
+    !matches!(queue_id, "deathmatch" | "ggteam" | "snowball" | "hurm")
+}
+
 /// A human description of what the player is currently doing, for the header
 /// and Discord presence.
 pub fn describe_activity(p: &Presence, mode: &str) -> String {

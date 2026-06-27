@@ -252,6 +252,7 @@ pub fn parse_history(json: &Value, sd: &StaticData) -> Vec<HistoryEntry> {
                     .unwrap_or(0) as i32,
                 tier,
                 rank_name: sd.rank_name(tier),
+                ranked: true,
                 ..Default::default()
             }
         })
@@ -384,10 +385,14 @@ pub struct MatchStats {
     pub deaths: u32,
     pub assists: u32,
     pub acs: u32,
+    pub adr: u32,
+    pub kast: u32,
     pub hs: u32,
     pub self_rounds: u32,
     pub enemy_rounds: u32,
     pub won: bool,
+    pub map: String,
+    pub map_image: String,
     pub agent_icon: String,
     pub agent_name: String,
     pub scoreboard: Vec<ScoreEntry>,
@@ -404,6 +409,18 @@ pub fn parse_match_stats(detail: &Value, puuid: &str, sd: &StaticData) -> MatchS
     };
     let character_id = me.get("characterId").and_then(|v| v.as_str()).unwrap_or("");
     let team_id = me.get("teamId").and_then(|v| v.as_str()).unwrap_or("");
+    let match_info = detail.get("matchInfo");
+    let map_path = match_info
+        .and_then(|m| m.get("mapId"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let queue_id = match_info
+        .and_then(|m| m.get("queueId"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    // Score races like deathmatch report one pseudo-round, so per-round stats
+    // come out nonsensical. Leave them blank for those modes.
+    let rounds_based = crate::presence::has_rounds(queue_id);
     let stat = |k: &str| {
         me.get("stats")
             .and_then(|s| s.get(k))
@@ -411,7 +428,23 @@ pub fn parse_match_stats(detail: &Value, puuid: &str, sd: &StaticData) -> MatchS
             .unwrap_or(0) as u32
     };
     let rounds = stat("roundsPlayed").max(1);
-    let acs = stat("score") / rounds;
+    let acs = if rounds_based { stat("score") / rounds } else { 0 };
+    let adr = if rounds_based {
+        (round_damage(detail, puuid) / rounds as u64) as u32
+    } else {
+        0
+    };
+    let kast = if rounds_based {
+        let (q, p) = kast_rounds(detail, puuid);
+        if p > 0 {
+            q * 100 / p
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+    let hs = if rounds_based { headshot_pct(detail, puuid) } else { 0 };
 
     let mut won = false;
     let mut self_rounds = 0;
@@ -454,8 +487,8 @@ pub fn parse_match_stats(detail: &Value, puuid: &str, sd: &StaticData) -> MatchS
                 kills: g("kills"),
                 deaths: g("deaths"),
                 assists: g("assists"),
-                acs: g("score") / rp,
-                hs: headshot_pct(detail, subject),
+                acs: if rounds_based { g("score") / rp } else { 0 },
+                hs: if rounds_based { headshot_pct(detail, subject) } else { 0 },
                 ally: team == team_id,
                 is_self: subject == puuid,
             });
@@ -468,10 +501,14 @@ pub fn parse_match_stats(detail: &Value, puuid: &str, sd: &StaticData) -> MatchS
         deaths: stat("deaths"),
         assists: stat("assists"),
         acs,
-        hs: headshot_pct(detail, puuid),
+        adr,
+        kast,
+        hs,
         self_rounds,
         enemy_rounds,
         won,
+        map: sd.map_name(map_path),
+        map_image: sd.map_image(map_path),
         agent_icon: sd.agent_icon(character_id),
         agent_name: sd.agent_name(character_id),
         scoreboard,
@@ -799,33 +836,22 @@ fn smurf_score(
     score.min(SMURF_MAX)
 }
 
+/// Recent matches for the chosen queue (0 competitive, 1 unrated, 2 all). Each
+/// row's combat stats come from its match detail; competitive rows also carry
+/// the RR change and rank from competitiveupdates.
 pub async fn fetch_history(
     ctx: &AuthContext,
     region: &Region,
     version: &str,
     sd: &StaticData,
     cache: &mut HashMap<String, MatchStats>,
+    queue: u8,
 ) -> Vec<HistoryEntry> {
-    let url = format!(
-        "{}/mmr/v1/players/{}/competitiveupdates?startIndex=0&endIndex=15&queue=competitive",
-        region.pd_base(),
-        ctx.puuid
-    );
-    let json = match get_json_retry(&url, ctx, version).await {
-        Some(j) => j,
-        None => return Vec::new(),
+    let (mut entries, ids) = if queue == 0 {
+        comp_history(ctx, region, version, sd).await
+    } else {
+        mode_history(ctx, region, version, queue).await
     };
-
-    let mut entries = parse_history(&json, sd);
-    let ids: Vec<String> = json
-        .get("Matches")
-        .and_then(|m| m.as_array())
-        .map(|arr| {
-            arr.iter()
-                .map(|m| m.get("MatchID").and_then(|v| v.as_str()).unwrap_or("").to_string())
-                .collect()
-        })
-        .unwrap_or_default();
 
     for (entry, id) in entries.iter_mut().zip(ids) {
         if id.is_empty() {
@@ -849,15 +875,92 @@ pub async fn fetch_history(
             entry.deaths = s.deaths;
             entry.assists = s.assists;
             entry.acs = s.acs;
+            entry.adr = s.adr;
+            entry.kast = s.kast;
             entry.hs = s.hs;
             entry.self_rounds = s.self_rounds;
             entry.enemy_rounds = s.enemy_rounds;
             entry.won = s.won;
+            // Non-competitive rows have no map yet; competitive already has it
+            // from the update feed and the match detail agrees.
+            if !s.map.is_empty() {
+                entry.map = s.map;
+                entry.map_image = s.map_image;
+            }
             entry.scoreboard = s.scoreboard;
             entry.has_stats = true;
         }
     }
     entries
+}
+
+// Competitive history from competitiveupdates: rows carry tier and RR change.
+async fn comp_history(
+    ctx: &AuthContext,
+    region: &Region,
+    version: &str,
+    sd: &StaticData,
+) -> (Vec<HistoryEntry>, Vec<String>) {
+    let url = format!(
+        "{}/mmr/v1/players/{}/competitiveupdates?startIndex=0&endIndex=15&queue=competitive",
+        region.pd_base(),
+        ctx.puuid
+    );
+    let json = match get_json_retry(&url, ctx, version).await {
+        Some(j) => j,
+        None => return (Vec::new(), Vec::new()),
+    };
+    let entries = parse_history(&json, sd);
+    let ids = json
+        .get("Matches")
+        .and_then(|m| m.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|m| m.get("MatchID").and_then(|v| v.as_str()).unwrap_or("").to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    (entries, ids)
+}
+
+// Recent matches for a non-competitive queue from match-history. There is no RR,
+// so each row is left unranked and labelled with its mode; stats come from the
+// match detail in the shared enrichment pass. queue 1 is unrated, any other
+// value returns every mode.
+async fn mode_history(
+    ctx: &AuthContext,
+    region: &Region,
+    version: &str,
+    queue: u8,
+) -> (Vec<HistoryEntry>, Vec<String>) {
+    let filter = if queue == 1 { "&queue=unrated" } else { "" };
+    let url = format!(
+        "{}/match-history/v1/history/{}?startIndex=0&endIndex=15{}",
+        region.pd_base(),
+        ctx.puuid,
+        filter
+    );
+    let json = match get_json_retry(&url, ctx, version).await {
+        Some(j) => j,
+        None => return (Vec::new(), Vec::new()),
+    };
+    let history = match json.get("History").and_then(|h| h.as_array()) {
+        Some(h) => h,
+        None => return (Vec::new(), Vec::new()),
+    };
+    let mut entries = Vec::with_capacity(history.len());
+    let mut ids = Vec::with_capacity(history.len());
+    for m in history {
+        let id = m.get("MatchID").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let queue_id = m.get("QueueID").and_then(|v| v.as_str()).unwrap_or("");
+        entries.push(HistoryEntry {
+            rank_name: crate::presence::mode_name(queue_id),
+            ranked: false,
+            ..Default::default()
+        });
+        ids.push(id);
+    }
+    (entries, ids)
 }
 
 /// Build a row for the signed-in user, for display when not in a match.
@@ -1012,11 +1115,10 @@ pub async fn build_rows(
         } else {
             names.get(&p.puuid).cloned().unwrap_or_default()
         };
-        let account_level = if p.hide_level && !is_self {
-            0
-        } else {
-            p.account_level
-        };
+        // Riot still includes the real account level even when a player turns on
+        // "hide account level", so show it like the other trackers do rather than
+        // honoring the flag and blanking it.
+        let account_level = p.account_level;
         let (last_kills, last_deaths, last_hs, streak, rr_trend, recent_wins, recent_losses, has_combat) =
             match combat {
                 Some(r) => (r.kills, r.deaths, r.hs, r.streak, r.rr_trend, r.wins, r.losses, true),
@@ -1306,7 +1408,6 @@ pub fn refresh_rows(
                     puuid: p.puuid.clone(),
                     ..Default::default()
                 });
-            let is_self = p.puuid == self_puuid;
             row.team = match (&self_team, p.team.is_empty()) {
                 (_, true) => String::new(),
                 (Some(mine), _) if &p.team == mine => "Ally".to_string(),
@@ -1317,9 +1418,7 @@ pub fn refresh_rows(
             row.agent_icon = sd.agent_icon(&p.character_id);
             row.player_card = sd.card_art(&p.player_card_id);
             row.locked = p.locked;
-            if !(p.hide_level && !is_self) {
-                row.account_level = p.account_level;
-            }
+            row.account_level = p.account_level;
             row
         })
         .collect()
