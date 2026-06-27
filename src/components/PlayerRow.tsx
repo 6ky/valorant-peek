@@ -202,7 +202,7 @@ export function PlayerRow({
           carries the single per-row loading spinner while combat streams in. */}
       <div className="cell form">
         <div className="caps">
-          <span className={`s ${row.hasCombat ? tone(row.lastAcs, 180, 240, isEnemy) : "tone-neutral"}`}>
+          <span className={`s ${row.hasCombat ? tone(row.lastAcs, 170, 220, isEnemy) : "tone-neutral"}`}>
             <i>ACS</i>
             {row.hasCombat ? (
               row.lastAcs
@@ -212,15 +212,15 @@ export function PlayerRow({
               <em>&middot;</em>
             )}
           </span>
-          <span className={`s ${row.hasCombat ? tone(row.lastAdr, 125, 165, isEnemy) : "tone-neutral"}`}>
+          <span className={`s ${row.hasCombat ? tone(row.lastAdr, 120, 150, isEnemy) : "tone-neutral"}`}>
             <i>ADR</i>
             {row.hasCombat ? row.lastAdr : <em>&middot;</em>}
           </span>
-          <span className={`s ${row.hasCombat ? tone(row.lastKast, 60, 72, isEnemy) : "tone-neutral"}`}>
+          <span className={`s ${row.hasCombat ? tone(row.lastKast, 62, 72, isEnemy) : "tone-neutral"}`}>
             <i>KAST</i>
             {row.hasCombat ? `${row.lastKast}%` : <em>&middot;</em>}
           </span>
-          <span className={`s ${row.hasCombat ? tone(kd, 0.85, 1.3, isEnemy) : "tone-neutral"}`}>
+          <span className={`s ${row.hasCombat ? tone(kd, 0.85, 1.1, isEnemy) : "tone-neutral"}`}>
             <i>K/D</i>
             {row.hasCombat ? kd.toFixed(2) : <em>&middot;</em>}
           </span>

@@ -122,6 +122,11 @@ impl Rpc {
             if let Some(size) = psize {
                 act = act.party(activity::Party::new().size([size.min(5) as i32, 5]));
             }
+            // A button on the presence so anyone who sees it can find the project.
+            act = act.buttons(vec![activity::Button::new(
+                "Peek your lobby \u{1f440}",
+                "https://github.com/6ky/valorant-peek",
+            )]);
             client.set_activity(act)
         };
 
