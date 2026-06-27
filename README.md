@@ -65,6 +65,10 @@ Or download the `Peek_x.x.x_x64-setup.exe` from the
   history and an RR trend.
 - **Standby**: a waiting screen when VALORANT is not running.
 
+<div align="center">
+  <img src=".github/screenshots/idle.png" width="900" alt="Peek idle profile and recent history" />
+</div>
+
 ## Per player
 
 - Current rank and RR, plus leaderboard rank for Immortal and Radiant
