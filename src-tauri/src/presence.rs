@@ -45,6 +45,22 @@ pub fn parse_private(decoded: &Value) -> Presence {
     }
 }
 
+/// Party id from a decoded private presence blob, using the same nested-or-flat
+/// lookup as parse_private. None when absent or empty.
+pub fn parse_party_id(decoded: &Value) -> Option<String> {
+    let id = decoded
+        .get("partyPresenceData")
+        .and_then(|d| d.get("partyId"))
+        .or_else(|| decoded.get("partyId"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_string())
+    }
+}
+
 pub fn mode_name(queue_id: &str) -> String {
     let name = match queue_id {
         "competitive" => "Competitive",
@@ -92,7 +108,7 @@ pub fn describe_activity(p: &Presence, mode: &str) -> String {
     }
 }
 
-pub async fn fetch_self_presence(lf: &Lockfile, puuid: &str) -> Option<Presence> {
+async fn fetch_presences_raw(lf: &Lockfile) -> Option<Vec<Value>> {
     let url = format!("https://127.0.0.1:{}/chat/v4/presences", lf.port);
     let body: Value = crate::http::local_client()
         .get(url)
@@ -103,14 +119,43 @@ pub async fn fetch_self_presence(lf: &Lockfile, puuid: &str) -> Option<Presence>
         .json()
         .await
         .ok()?;
-    let presences = body.get("presences")?.as_array()?;
+    body.get("presences")?.as_array().cloned()
+}
+
+fn decode_private(entry: &Value) -> Option<Value> {
+    let private_b64 = entry.get("private").and_then(|v| v.as_str())?;
+    let decoded_bytes = STANDARD.decode(private_b64).ok()?;
+    serde_json::from_slice(&decoded_bytes).ok()
+}
+
+pub async fn fetch_self_presence(lf: &Lockfile, puuid: &str) -> Option<Presence> {
+    let presences = fetch_presences_raw(lf).await?;
     let me = presences
         .iter()
         .find(|p| p.get("puuid").and_then(|v| v.as_str()) == Some(puuid))?;
-    let private_b64 = me.get("private").and_then(|v| v.as_str())?;
-    let decoded_bytes = STANDARD.decode(private_b64).ok()?;
-    let decoded: Value = serde_json::from_slice(&decoded_bytes).ok()?;
+    let decoded = decode_private(me)?;
     Some(parse_private(&decoded))
+}
+
+/// Map of puuid to party id for every player visible in the local presence
+/// feed. In a match this covers the whole allied team, so it catches all ally
+/// parties. Enemies never appear here. Empty on failure, never panics.
+pub async fn fetch_party_map(lf: &Lockfile) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    let presences = match fetch_presences_raw(lf).await {
+        Some(p) => p,
+        None => return map,
+    };
+    for entry in &presences {
+        let puuid = match entry.get("puuid").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => continue,
+        };
+        if let Some(party) = decode_private(entry).as_ref().and_then(parse_party_id) {
+            map.insert(puuid.to_string(), party);
+        }
+    }
+    map
 }
 
 #[cfg(test)]
@@ -139,6 +184,19 @@ mod tests {
         assert_eq!(p.loop_state, "PREGAME");
         assert_eq!(p.queue_id, "deathmatch");
         assert_eq!(p.party_state, "DEFAULT");
+    }
+
+    #[test]
+    fn reads_party_id_nested_and_flat() {
+        let nested: Value =
+            serde_json::from_str(r#"{"partyPresenceData":{"partyId":"abc"}}"#).unwrap();
+        assert_eq!(parse_party_id(&nested), Some("abc".to_string()));
+
+        let flat: Value = serde_json::from_str(r#"{"partyId":"abc"}"#).unwrap();
+        assert_eq!(parse_party_id(&flat), Some("abc".to_string()));
+
+        let absent: Value = serde_json::from_str(r#"{"sessionLoopState":"MENUS"}"#).unwrap();
+        assert_eq!(parse_party_id(&absent), None);
     }
 
     #[test]

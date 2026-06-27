@@ -15,6 +15,10 @@ impl Region {
     pub fn glz_base(&self) -> String {
         format!("https://glz-{}-1.{}.a.pvp.net", self.region, self.shard)
     }
+
+    pub fn shared_base(&self) -> String {
+        format!("https://shared.{}.a.pvp.net", self.shard)
+    }
 }
 
 /// Pull region and shard out of a glz URL found in VALORANT's log, e.g.
@@ -105,6 +109,7 @@ mod tests {
         };
         assert_eq!(r.pd_base(), "https://pd.na.a.pvp.net");
         assert_eq!(r.glz_base(), "https://glz-na-1.na.a.pvp.net");
+        assert_eq!(r.shared_base(), "https://shared.na.a.pvp.net");
     }
 
     #[test]

@@ -1,6 +1,5 @@
 use crate::auth::{pvp_headers, AuthContext};
 use crate::client_version::Region;
-use crate::http::pvp_client;
 use crate::model::MatchState;
 use serde_json::Value;
 
@@ -9,7 +8,6 @@ pub struct RawPlayer {
     pub puuid: String,
     pub team: String,
     pub character_id: String,
-    pub party_id: String,
     pub account_level: u32,
     pub incognito: bool,
     pub hide_level: bool,
@@ -51,7 +49,6 @@ pub fn parse_match_players(json: &Value) -> Vec<RawPlayer> {
                 puuid: s("Subject"),
                 team: s("TeamID"),
                 character_id: s("CharacterID"),
-                party_id: s("PartyID"),
                 account_level: id_u64("AccountLevel") as u32,
                 incognito: id_bool("Incognito"),
                 hide_level: id_bool("HideAccountLevel"),
@@ -62,18 +59,14 @@ pub fn parse_match_players(json: &Value) -> Vec<RawPlayer> {
         .collect()
 }
 
-async fn match_id(client: &reqwest::Client, url: &str, headers: &reqwest::header::HeaderMap) -> Option<String> {
-    let resp = client.get(url).headers(headers.clone()).send().await.ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let v: Value = resp.json().await.ok()?;
-    v.get("MatchID").and_then(|m| m.as_str()).map(String::from)
+async fn match_id(url: &str, headers: &reqwest::header::HeaderMap) -> Option<String> {
+    crate::http::get_json_retry(url, headers.clone())
+        .await
+        .and_then(|v| v.get("MatchID").and_then(|m| m.as_str()).map(String::from))
 }
 
-async fn fetch_doc(client: &reqwest::Client, url: &str, headers: &reqwest::header::HeaderMap) -> Option<Value> {
-    let resp = client.get(url).headers(headers.clone()).send().await.ok()?;
-    resp.json().await.ok()
+async fn fetch_doc(url: &str, headers: &reqwest::header::HeaderMap) -> Option<Value> {
+    crate::http::get_json_retry(url, headers.clone()).await
 }
 
 /// Snapshot of the local player's current match phase.
@@ -86,13 +79,12 @@ pub struct CurrentState {
 }
 
 pub async fn current_state(ctx: &AuthContext, region: &Region, version: &str) -> CurrentState {
-    let client = pvp_client();
     let headers = pvp_headers(ctx, version);
 
     let cg_player = format!("{}/core-game/v1/players/{}", region.glz_base(), ctx.puuid);
-    if let Some(mid) = match_id(&client, &cg_player, &headers).await {
+    if let Some(mid) = match_id(&cg_player, &headers).await {
         let murl = format!("{}/core-game/v1/matches/{}", region.glz_base(), mid);
-        let players = fetch_doc(&client, &murl, &headers)
+        let players = fetch_doc(&murl, &headers)
             .await
             .map(|v| parse_match_players(&v))
             .unwrap_or_default();
@@ -105,9 +97,9 @@ pub async fn current_state(ctx: &AuthContext, region: &Region, version: &str) ->
     }
 
     let pg_player = format!("{}/pregame/v1/players/{}", region.glz_base(), ctx.puuid);
-    if let Some(mid) = match_id(&client, &pg_player, &headers).await {
+    if let Some(mid) = match_id(&pg_player, &headers).await {
         let murl = format!("{}/pregame/v1/matches/{}", region.glz_base(), mid);
-        let doc = fetch_doc(&client, &murl, &headers).await;
+        let doc = fetch_doc(&murl, &headers).await;
         let players = doc
             .as_ref()
             .and_then(|v| v.get("AllyTeam"))
@@ -143,7 +135,7 @@ mod tests {
     fn parses_coregame_players() {
         let v: Value = serde_json::from_str(
             r#"{"Players":[
-                {"Subject":"p1","TeamID":"Blue","CharacterID":"add6443a-41bd-e414-f6ad-e58d267f4e95","PartyID":"party-a","PlayerIdentity":{"AccountLevel":120}},
+                {"Subject":"p1","TeamID":"Blue","CharacterID":"add6443a-41bd-e414-f6ad-e58d267f4e95","PlayerIdentity":{"AccountLevel":120}},
                 {"Subject":"p2","TeamID":"Red","CharacterID":""}
             ]}"#,
         )
@@ -152,10 +144,8 @@ mod tests {
         assert_eq!(players.len(), 2);
         assert_eq!(players[0].puuid, "p1");
         assert_eq!(players[0].team, "Blue");
-        assert_eq!(players[0].party_id, "party-a");
         assert_eq!(players[0].account_level, 120);
         assert_eq!(players[1].team, "Red");
-        assert_eq!(players[1].party_id, "");
         assert_eq!(players[1].account_level, 0);
         assert!(!players[0].locked);
     }

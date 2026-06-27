@@ -1,43 +1,16 @@
 use crate::auth::{pvp_headers, AuthContext};
 use crate::client_version::Region;
-use crate::http::pvp_client;
 use crate::match_state::RawPlayer;
 use crate::model::{HistoryEntry, PlayerRow, ScoreEntry};
 use crate::static_cache::StaticData;
 use serde_json::Value;
-use std::collections::HashMap;
-use std::time::Duration;
+use std::collections::{HashMap, HashSet};
 
 // Authed GET that parses JSON, backing off and retrying on HTTP 429. Reads
 // Retry-After (seconds) for the wait, defaulting to 5, plus a 1s buffer. Gives
 // up after 3 retries. Transport errors and parse errors return None.
 async fn get_json_retry(url: &str, ctx: &AuthContext, version: &str) -> Option<Value> {
-    for _ in 0..3 {
-        let resp = pvp_client()
-            .get(url)
-            .headers(pvp_headers(ctx, version))
-            .send()
-            .await
-            .ok()?;
-        if resp.status().as_u16() == 429 {
-            let secs = resp
-                .headers()
-                .get("Retry-After")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(5);
-            tokio::time::sleep(Duration::from_secs(secs + 1)).await;
-            continue;
-        }
-        // Do not treat an error body (e.g. a 404 from a version mismatch) as
-        // data; return None so callers keep the last known value instead of
-        // flashing unranked.
-        if !resp.status().is_success() {
-            return None;
-        }
-        return resp.json().await.ok();
-    }
-    None
+    crate::http::get_json_retry(url, pvp_headers(ctx, version)).await
 }
 
 #[derive(Debug, PartialEq, Eq, Default)]
@@ -51,35 +24,81 @@ pub struct Mmr {
     pub leaderboard: u32,
 }
 
-pub fn parse_mmr(json: &Value) -> Mmr {
-    let latest = json.get("LatestCompetitiveUpdate");
-    let tier = latest
-        .and_then(|l| l.get("TierAfterUpdate"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
-    let rr = latest
-        .and_then(|l| l.get("RankedRatingAfterUpdate"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
-    let season_id = latest
-        .and_then(|l| l.get("SeasonID"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+/// The active act's season id, from the content service. Used to key the
+/// current rank so a player who has not played this act reads as Unranked
+/// instead of showing their last act's rank. None on any failure.
+pub async fn fetch_current_act(ctx: &AuthContext, region: &Region, version: &str) -> Option<String> {
+    let url = format!("{}/content-service/v3/content", region.shared_base());
+    let body = crate::http::get_json_retry(&url, pvp_headers(ctx, version)).await?;
+    let seasons = body.get("Seasons").and_then(|s| s.as_array())?;
+    seasons
+        .iter()
+        .find(|s| {
+            s.get("IsActive").and_then(|v| v.as_bool()) == Some(true)
+                && s.get("Type").and_then(|v| v.as_str()) == Some("act")
+        })
+        .and_then(|s| s.get("ID").and_then(|v| v.as_str()).map(String::from))
+}
 
-    let mut peak = tier;
-    let mut peak_season = season_id.to_string();
-    let mut wins = 0;
-    let mut games = 0;
-    let mut leaderboard = 0;
+pub fn parse_mmr(json: &Value, current_act: &str) -> Mmr {
     let seasons = json
         .get("QueueSkills")
         .and_then(|q| q.get("competitive"))
         .and_then(|c| c.get("SeasonalInfoBySeasonID"))
         .and_then(|s| s.as_object());
+
+    let mut tier = 0u32;
+    let mut rr = 0u32;
+    let mut wins = 0u32;
+    let mut games = 0u32;
+    let mut leaderboard = 0u32;
+    // Season the current rank was read from, used to seed the peak scan.
+    let mut current_season = current_act.to_string();
+
+    if !current_act.is_empty() {
+        // Read the current act's entry. When it is absent the player has not
+        // placed this act, so everything stays zero (Unranked).
+        if let Some(info) = seasons.and_then(|s| s.get(current_act)) {
+            tier = info.get("CompetitiveTier").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            // Tiers 1 and 2 are unused legacy slots, 0 is unranked.
+            if tier <= 2 {
+                tier = 0;
+            }
+            rr = info.get("RankedRating").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            games = info.get("NumberOfGames").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            wins = info
+                .get("NumberOfWinsWithPlacements")
+                .or_else(|| info.get("NumberOfWins"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            leaderboard = info.get("LeaderboardRank").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+        }
+    } else {
+        // Content fetch failed; degrade to the last competitive game's tier and
+        // rr. games/wins/leaderboard are read from the matching season below.
+        let latest = json.get("LatestCompetitiveUpdate");
+        tier = latest
+            .and_then(|l| l.get("TierAfterUpdate"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+        rr = latest
+            .and_then(|l| l.get("RankedRatingAfterUpdate"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+        current_season = latest
+            .and_then(|l| l.get("SeasonID"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+    }
+
+    // Peak comes from the tiers actually achieved (WinsByTier keys), not the
+    // season-end tier, which can be lower than the peak. Seeded from the
+    // current rank so the active act counts toward the peak too.
+    let mut peak = tier;
+    let mut peak_season = current_season.clone();
     if let Some(seasons) = seasons {
         for (id, info) in seasons {
-            // Peak comes from the tiers actually achieved (WinsByTier keys),
-            // not the season-end tier, which can be lower than the peak.
             let mut season_peak = 0;
             if let Some(wins_by_tier) = info.get("WinsByTier").and_then(|w| w.as_object()) {
                 for key in wins_by_tier.keys() {
@@ -95,7 +114,9 @@ pub fn parse_mmr(json: &Value) -> Mmr {
                 peak = season_peak;
                 peak_season = id.clone();
             }
-            if id == season_id {
+            // In the fallback path, the current fields come from the season that
+            // matches the last competitive game.
+            if current_act.is_empty() && id == &current_season {
                 wins = info
                     .get("NumberOfWinsWithPlacements")
                     .or_else(|| info.get("NumberOfWins"))
@@ -150,19 +171,8 @@ pub async fn fetch_names(
     puuids: &[String],
 ) -> HashMap<String, String> {
     let url = format!("{}/name-service/v2/players", region.pd_base());
-    let body: Option<Value> = async {
-        pvp_client()
-            .put(&url)
-            .headers(pvp_headers(ctx, version))
-            .json(puuids)
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()
-    }
-    .await;
+    let body =
+        crate::http::put_json_retry(&url, pvp_headers(ctx, version), &serde_json::json!(puuids)).await;
     body.map(|v| parse_names(&v)).unwrap_or_default()
 }
 
@@ -173,10 +183,11 @@ pub async fn fetch_mmr(
     region: &Region,
     version: &str,
     puuid: &str,
+    current_act: &str,
 ) -> Option<Mmr> {
     let url = format!("{}/mmr/v1/players/{}", region.pd_base(), puuid);
     let body = get_json_retry(&url, ctx, version).await;
-    body.map(|v| parse_mmr(&v))
+    body.map(|v| parse_mmr(&v, current_act))
 }
 
 pub fn parse_account_level(json: &Value) -> u32 {
@@ -193,18 +204,7 @@ pub async fn fetch_account_level(
     puuid: &str,
 ) -> u32 {
     let url = format!("{}/account-xp/v1/players/{}", region.pd_base(), puuid);
-    let body: Option<Value> = async {
-        pvp_client()
-            .get(&url)
-            .headers(pvp_headers(ctx, version))
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()
-    }
-    .await;
+    let body = get_json_retry(&url, ctx, version).await;
     body.map(|v| parse_account_level(&v)).unwrap_or(0)
 }
 
@@ -220,18 +220,7 @@ pub async fn fetch_loadout_card(
         region.pd_base(),
         puuid
     );
-    let body: Option<Value> = async {
-        pvp_client()
-            .get(&url)
-            .headers(pvp_headers(ctx, version))
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()
-    }
-    .await;
+    let body = get_json_retry(&url, ctx, version).await;
     body.and_then(|v| {
         v.get("Identity")
             .and_then(|i| i.get("PlayerCardID"))
@@ -303,6 +292,90 @@ pub fn headshot_pct(detail: &Value, puuid: &str) -> u32 {
     } else {
         0
     }
+}
+
+/// Raw damage a player dealt across every round, summed from each round's damage
+/// entries, mirroring shot_counts.
+fn round_damage(detail: &Value, puuid: &str) -> u64 {
+    let mut total = 0u64;
+    if let Some(rounds) = detail.get("roundResults").and_then(|r| r.as_array()) {
+        for round in rounds {
+            if let Some(stats) = round.get("playerStats").and_then(|p| p.as_array()) {
+                for ps in stats {
+                    if ps.get("subject").and_then(|v| v.as_str()) != Some(puuid) {
+                        continue;
+                    }
+                    if let Some(damage) = ps.get("damage").and_then(|d| d.as_array()) {
+                        for d in damage {
+                            total += d.get("damage").and_then(|v| v.as_u64()).unwrap_or(0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    total
+}
+
+// A trade counts only when the avenger kills within this window of the player's death.
+const TRADE_WINDOW_MS: i64 = 3000;
+
+/// KAST tally for a player: (qualifying rounds, rounds present). A round counts
+/// toward KAST when the player got a Kill, an Assist, Survived, or was Traded
+/// within TRADE_WINDOW_MS of dying. Rounds the player was absent for are skipped.
+fn kast_rounds(detail: &Value, puuid: &str) -> (u32, u32) {
+    let (mut qualifying, mut present) = (0u32, 0u32);
+    let rounds = match detail.get("roundResults").and_then(|r| r.as_array()) {
+        Some(r) => r,
+        None => return (0, 0),
+    };
+    for round in rounds {
+        let stats = match round.get("playerStats").and_then(|p| p.as_array()) {
+            Some(s) => s,
+            None => continue,
+        };
+        let here = stats
+            .iter()
+            .any(|ps| ps.get("subject").and_then(|v| v.as_str()) == Some(puuid));
+        if !here {
+            continue;
+        }
+        present += 1;
+
+        // (killer, victim, roundTime, assistants) for every kill in the round.
+        let mut kills: Vec<(&str, &str, i64, Vec<&str>)> = Vec::new();
+        for ps in stats {
+            if let Some(arr) = ps.get("kills").and_then(|k| k.as_array()) {
+                for k in arr {
+                    let killer = k.get("killer").and_then(|v| v.as_str()).unwrap_or("");
+                    let victim = k.get("victim").and_then(|v| v.as_str()).unwrap_or("");
+                    let time = k.get("roundTime").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let assists = k
+                        .get("assistants")
+                        .and_then(|a| a.as_array())
+                        .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+                        .unwrap_or_default();
+                    kills.push((killer, victim, time, assists));
+                }
+            }
+        }
+
+        let got_kill = kills.iter().any(|(killer, ..)| *killer == puuid);
+        let assisted = kills.iter().any(|(.., a)| a.contains(&puuid));
+        let death = kills.iter().find(|(_, victim, ..)| *victim == puuid);
+        let survived = death.is_none();
+        let traded = match death {
+            Some((killer, _, t, _)) => kills.iter().any(|(_, victim, vt, _)| {
+                *victim == *killer && *vt >= *t && *vt <= *t + TRADE_WINDOW_MS
+            }),
+            None => false,
+        };
+
+        if got_kill || assisted || survived || traded {
+            qualifying += 1;
+        }
+    }
+    (qualifying, present)
 }
 
 #[derive(Clone, Default)]
@@ -474,16 +547,32 @@ const COMBAT_PLAYER_CONCURRENCY: usize = 3;
 
 /// Recent competitive form for a player: kills, deaths and headshot% aggregated
 /// over their last `games` competitive matches, plus streak, RR trend and
-/// win/loss record over the full recent Matches list. None when the history request
-/// fails or there are no comp matches; match details that fail to load are
-/// skipped and the rest are still aggregated.
+/// win/loss record over the full recent Matches list, and the set of other
+/// players who shared this player's party in any of those matches. None when the
+/// history request fails or there are no comp matches; match details that fail to
+/// load are skipped and the rest are still aggregated.
+pub struct RecentForm {
+    pub kills: u32,
+    pub deaths: u32,
+    pub hs: u32,
+    pub acs: u32,
+    pub adr: u32,
+    pub kast: u32,
+    pub assists: u32,
+    pub streak: i32,
+    pub rr_trend: i32,
+    pub wins: u32,
+    pub losses: u32,
+    pub mates: Vec<String>,
+}
+
 pub async fn fetch_player_recent(
     ctx: &AuthContext,
     region: &Region,
     version: &str,
     puuid: &str,
     games: usize,
-) -> Option<(u32, u32, u32, i32, i32, u32, u32)> {
+) -> Option<RecentForm> {
     let url = format!(
         "{}/mmr/v1/players/{}/competitiveupdates?startIndex=0&endIndex=10&queue=competitive",
         region.pd_base(),
@@ -516,14 +605,15 @@ pub async fn fetch_player_recent(
 
     let (mut total_kills, mut total_deaths) = (0u64, 0u64);
     let (mut head, mut body, mut leg) = (0u64, 0u64, 0u64);
+    let (mut total_assists, mut total_score, mut total_damage) = (0u64, 0u64, 0u64);
+    let (mut total_kast, mut total_rounds) = (0u64, 0u64);
+    let mut mates: HashSet<String> = HashSet::new();
     for detail in details.into_iter().flatten() {
-        let me = detail
-            .get("players")
-            .and_then(|p| p.as_array())
-            .and_then(|arr| {
-                arr.iter()
-                    .find(|p| p.get("subject").and_then(|v| v.as_str()) == Some(puuid))
-            });
+        let players = detail.get("players").and_then(|p| p.as_array());
+        let me = players.and_then(|arr| {
+            arr.iter()
+                .find(|p| p.get("subject").and_then(|v| v.as_str()) == Some(puuid))
+        });
         if let Some(me) = me {
             let stat = |k: &str| {
                 me.get("stats")
@@ -533,6 +623,26 @@ pub async fn fetch_player_recent(
             };
             total_kills += stat("kills");
             total_deaths += stat("deaths");
+            total_assists += stat("assists");
+            total_score += stat("score");
+            total_damage += round_damage(&detail, puuid);
+            let (qual, present) = kast_rounds(&detail, puuid);
+            total_kast += qual as u64;
+            total_rounds += present as u64;
+            // Anyone sharing this player's non-empty partyId in this match is a
+            // teammate who queued with them, so likely a premade.
+            let my_party = me.get("partyId").and_then(|v| v.as_str()).unwrap_or("");
+            if !my_party.is_empty() {
+                if let Some(arr) = players {
+                    for other in arr {
+                        let subj = other.get("subject").and_then(|v| v.as_str()).unwrap_or("");
+                        let party = other.get("partyId").and_then(|v| v.as_str()).unwrap_or("");
+                        if subj != puuid && !subj.is_empty() && party == my_party {
+                            mates.insert(subj.to_string());
+                        }
+                    }
+                }
+            }
         }
         let (h, b, l) = shot_counts(&detail, puuid);
         head += h;
@@ -542,15 +652,21 @@ pub async fn fetch_player_recent(
 
     let shots = head + body + leg;
     let hs_pct = if shots > 0 { (head * 100 / shots) as u32 } else { 0 };
-    Some((
-        total_kills as u32,
-        total_deaths as u32,
-        hs_pct,
+    let rounds = total_rounds.max(1);
+    Some(RecentForm {
+        kills: total_kills as u32,
+        deaths: total_deaths as u32,
+        hs: hs_pct,
+        acs: (total_score / rounds) as u32,
+        adr: (total_damage / rounds) as u32,
+        kast: (total_kast * 100 / rounds) as u32,
+        assists: total_assists as u32,
         streak,
         rr_trend,
-        recent_wins,
-        recent_losses,
-    ))
+        wins: recent_wins,
+        losses: recent_losses,
+        mates: mates.into_iter().collect(),
+    })
 }
 
 // Default melee weapon and its skin socket, used to read a player's equipped
@@ -636,18 +752,7 @@ async fn fetch_loadouts(
         region.glz_base(),
         match_id
     );
-    let body: Value = async {
-        pvp_client()
-            .get(&url)
-            .headers(pvp_headers(ctx, version))
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()
-    }
-    .await?;
+    let body = get_json_retry(&url, ctx, version).await?;
     body.get("Loadouts").and_then(|l| l.as_array()).cloned()
 }
 
@@ -706,19 +811,7 @@ pub async fn fetch_history(
         region.pd_base(),
         ctx.puuid
     );
-    let body: Option<Value> = async {
-        pvp_client()
-            .get(&url)
-            .headers(pvp_headers(ctx, version))
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()
-    }
-    .await;
-    let json = match body {
+    let json = match get_json_retry(&url, ctx, version).await {
         Some(j) => j,
         None => return Vec::new(),
     };
@@ -772,18 +865,20 @@ pub async fn build_self(
     ctx: &AuthContext,
     region: &Region,
     version: &str,
+    current_act: &str,
     sd: &StaticData,
+    party_map: &HashMap<String, String>,
 ) -> Option<PlayerRow> {
     // If the rank request fails, return None so the caller keeps the last
     // known profile instead of flashing unranked.
-    let mmr = fetch_mmr(ctx, region, version, &ctx.puuid).await?;
+    let mmr = fetch_mmr(ctx, region, version, &ctx.puuid, current_act).await?;
     let puuids = [ctx.puuid.clone()];
     let names = fetch_names(ctx, region, version, &puuids).await;
     let level = fetch_account_level(ctx, region, version, &ctx.puuid).await;
     let card_id = fetch_loadout_card(ctx, region, version, &ctx.puuid).await;
     let (last_kills, last_deaths, last_hs, streak, rr_trend, recent_wins, recent_losses, has_combat) =
         match fetch_player_recent(ctx, region, version, &ctx.puuid, RECENT_GAMES).await {
-            Some((k, d, h, s, t, w, l)) => (k, d, h, s, t, w, l, true),
+            Some(r) => (r.kills, r.deaths, r.hs, r.streak, r.rr_trend, r.wins, r.losses, true),
             None => (0, 0, 0, 0, 0, 0, 0, false),
         };
     Some(PlayerRow {
@@ -793,7 +888,7 @@ pub async fn build_self(
         agent: String::new(),
         agent_icon: String::new(),
         team: String::new(),
-        party_id: String::new(),
+        party_id: party_map.get(&ctx.puuid).cloned().unwrap_or_default(),
         hidden_name: false,
         rank_tier: mmr.tier,
         rank_name: sd.rank_name(mmr.tier),
@@ -811,6 +906,10 @@ pub async fn build_self(
         last_kills,
         last_deaths,
         last_hs,
+        last_acs: 0,
+        last_adr: 0,
+        last_kast: 0,
+        last_assists: 0,
         has_combat,
         streak,
         rr_trend,
@@ -833,9 +932,11 @@ pub async fn build_rows(
     ctx: &AuthContext,
     region: &Region,
     version: &str,
+    current_act: &str,
     players: &[RawPlayer],
     sd: &StaticData,
     last_rows: &[PlayerRow],
+    party_map: &HashMap<String, String>,
     fetch_combat: bool,
     match_id: Option<&str>,
 ) -> Vec<PlayerRow> {
@@ -873,19 +974,26 @@ pub async fn build_rows(
     // Fetch each player's rank concurrently. Last-match combat stats (K/D, HS)
     // are an extra request per player, so they are only fetched when the user
     // opts in, matching vry's behaviour.
-    let fetched = futures::future::join_all(players.iter().map(|p| {
-        let puuid = p.puuid.clone();
-        async move {
-            let mmr = fetch_mmr(ctx, region, version, &puuid).await;
-            let combat = if fetch_combat {
-                fetch_player_recent(ctx, region, version, &puuid, RECENT_GAMES).await
-            } else {
-                None
-            };
-            (mmr, combat)
-        }
-    }))
-    .await;
+    // Fetch ranks in small concurrent batches rather than all at once, so a
+    // full lobby does not burst the rank endpoint into a rate limit.
+    const MMR_CONCURRENCY: usize = 4;
+    let mut fetched = Vec::with_capacity(players.len());
+    for chunk in players.chunks(MMR_CONCURRENCY) {
+        let part = futures::future::join_all(chunk.iter().map(|p| {
+            let puuid = p.puuid.clone();
+            async move {
+                let mmr = fetch_mmr(ctx, region, version, &puuid, current_act).await;
+                let combat = if fetch_combat {
+                    fetch_player_recent(ctx, region, version, &puuid, RECENT_GAMES).await
+                } else {
+                    None
+                };
+                (mmr, combat)
+            }
+        }))
+        .await;
+        fetched.extend(part);
+    }
 
     let mut rows = Vec::with_capacity(players.len());
     for (i, (p, (mmr_opt, combat))) in players.iter().zip(fetched).enumerate() {
@@ -911,13 +1019,20 @@ pub async fn build_rows(
         };
         let (last_kills, last_deaths, last_hs, streak, rr_trend, recent_wins, recent_losses, has_combat) =
             match combat {
-                Some((k, d, h, s, t, w, l)) => (k, d, h, s, t, w, l, true),
+                Some(r) => (r.kills, r.deaths, r.hs, r.streak, r.rr_trend, r.wins, r.losses, true),
                 None => (0, 0, 0, 0, 0, 0, 0, false),
             };
-        let party_size = if p.party_id.is_empty() {
+        // Ally parties come from the presence map; enemies fill in later via
+        // match-history inference. Size counts roster members sharing the same
+        // non-empty party id.
+        let party_id = party_map.get(&p.puuid).cloned().unwrap_or_default();
+        let party_size = if party_id.is_empty() {
             1
         } else {
-            players.iter().filter(|q| q.party_id == p.party_id).count() as u32
+            players
+                .iter()
+                .filter(|q| party_map.get(&q.puuid).map(|s| s.as_str()) == Some(party_id.as_str()))
+                .count() as u32
         };
         let premium_skins = premium_by_puuid
             .get(&p.puuid)
@@ -937,7 +1052,7 @@ pub async fn build_rows(
             agent: sd.agent_name(&p.character_id),
             agent_icon: sd.agent_icon(&p.character_id),
             team,
-            party_id: p.party_id.clone(),
+            party_id,
             hidden_name,
             rank_tier: mmr.tier,
             rank_name: sd.rank_name(mmr.tier),
@@ -955,6 +1070,10 @@ pub async fn build_rows(
             last_kills,
             last_deaths,
             last_hs,
+            last_acs: 0,
+            last_adr: 0,
+            last_kast: 0,
+            last_assists: 0,
             has_combat,
             streak,
             rr_trend,
@@ -994,6 +1113,10 @@ pub async fn build_rows(
                     row.last_kills = prev.last_kills;
                     row.last_deaths = prev.last_deaths;
                     row.last_hs = prev.last_hs;
+                    row.last_acs = prev.last_acs;
+                    row.last_adr = prev.last_adr;
+                    row.last_kast = prev.last_kast;
+                    row.last_assists = prev.last_assists;
                     row.streak = prev.streak;
                     row.rr_trend = prev.rr_trend;
                     row.recent_wins = prev.recent_wins;
@@ -1017,13 +1140,14 @@ pub async fn enrich_combat(
     version: &str,
     rows: &mut [PlayerRow],
     puuids: &[String],
+    mates_map: &mut HashMap<String, HashSet<String>>,
+    party_map: &HashMap<String, String>,
 ) {
     // Split the match-detail budget across the whole roster so a big lobby
     // fetches fewer games per player and stays under the rate limit, even when
     // only a subset is being filled in this pass.
     let games = (RECENT_GAMES_BUDGET / rows.len().max(1)).clamp(1, RECENT_GAMES);
-    let mut updates: Vec<(String, Option<(u32, u32, u32, i32, i32, u32, u32)>)> =
-        Vec::with_capacity(puuids.len());
+    let mut updates: Vec<(String, Option<RecentForm>)> = Vec::with_capacity(puuids.len());
     for chunk in puuids.chunks(COMBAT_PLAYER_CONCURRENCY) {
         let part = futures::future::join_all(chunk.iter().map(|puuid| async move {
             let recent = fetch_player_recent(ctx, region, version, puuid, games).await;
@@ -1033,18 +1157,128 @@ pub async fn enrich_combat(
         updates.extend(part);
     }
     for (puuid, recent) in updates {
-        if let Some((k, d, h, s, t, w, l)) = recent {
-            if let Some(row) = rows.iter_mut().find(|r| r.puuid == puuid) {
-                row.last_kills = k;
-                row.last_deaths = d;
-                row.last_hs = h;
-                row.streak = s;
-                row.rr_trend = t;
-                row.recent_wins = w;
-                row.recent_losses = l;
+        if let Some(r) = recent {
+            mates_map.insert(puuid.clone(), r.mates.iter().cloned().collect());
+            if let Some(row) = rows.iter_mut().find(|row| row.puuid == puuid) {
+                row.last_kills = r.kills;
+                row.last_deaths = r.deaths;
+                row.last_hs = r.hs;
+                row.last_acs = r.acs;
+                row.last_adr = r.adr;
+                row.last_kast = r.kast;
+                row.last_assists = r.assists;
+                row.streak = r.streak;
+                row.rr_trend = r.rr_trend;
+                row.recent_wins = r.wins;
+                row.recent_losses = r.losses;
                 row.has_combat = true;
             }
         }
+    }
+    apply_parties(rows, party_map, mates_map);
+}
+
+/// Resolve every row's party from two sources: presence party ids (authoritative
+/// for allies) and match-history mates (inferred for enemies). Presence ids are
+/// never overwritten. Rows with no presence id are grouped by union-find: any two
+/// rows that appeared in each other's recent mate sets join the same component,
+/// which gets a synthetic id keyed on its smallest puuid. party_size is then the
+/// count of rows sharing each resolved non-empty id.
+fn apply_parties(
+    rows: &mut [PlayerRow],
+    party_map: &HashMap<String, String>,
+    mates_map: &HashMap<String, HashSet<String>>,
+) {
+    let n = rows.len();
+    // Authoritative presence id per row, empty when the player has none.
+    let pres: Vec<String> = rows
+        .iter()
+        .map(|r| party_map.get(&r.puuid).cloned().unwrap_or_default())
+        .collect();
+
+    // Union-find over row indices, used only for rows lacking a presence id.
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn find(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    fn union(parent: &mut [usize], a: usize, b: usize) {
+        let (ra, rb) = (find(parent, a), find(parent, b));
+        if ra != rb {
+            parent[ra.max(rb)] = ra.min(rb);
+        }
+    }
+    for a in 0..n {
+        if !pres[a].is_empty() {
+            continue;
+        }
+        for b in (a + 1)..n {
+            if !pres[b].is_empty() {
+                continue;
+            }
+            let a_has_b = mates_map
+                .get(&rows[a].puuid)
+                .map(|s| s.contains(&rows[b].puuid))
+                .unwrap_or(false);
+            let b_has_a = mates_map
+                .get(&rows[b].puuid)
+                .map(|s| s.contains(&rows[a].puuid))
+                .unwrap_or(false);
+            if a_has_b || b_has_a {
+                union(&mut parent, a, b);
+            }
+        }
+    }
+
+    // Smallest puuid per component, used to mint a stable synthetic id.
+    let mut root_min: HashMap<usize, String> = HashMap::new();
+    for i in 0..n {
+        if !pres[i].is_empty() {
+            continue;
+        }
+        let r = find(&mut parent, i);
+        let e = root_min.entry(r).or_insert_with(|| rows[i].puuid.clone());
+        if rows[i].puuid < *e {
+            *e = rows[i].puuid.clone();
+        }
+    }
+    // Count component members so singletons keep an empty id.
+    let mut comp_size: HashMap<usize, u32> = HashMap::new();
+    for i in 0..n {
+        if pres[i].is_empty() {
+            *comp_size.entry(find(&mut parent, i)).or_insert(0) += 1;
+        }
+    }
+
+    for i in 0..n {
+        if !pres[i].is_empty() {
+            rows[i].party_id = pres[i].clone();
+        } else {
+            let r = find(&mut parent, i);
+            if comp_size.get(&r).copied().unwrap_or(0) >= 2 {
+                rows[i].party_id = format!("h:{}", root_min[&r]);
+            } else {
+                rows[i].party_id = String::new();
+            }
+        }
+    }
+
+    // Recompute sizes from the resolved ids.
+    let mut id_count: HashMap<String, u32> = HashMap::new();
+    for r in rows.iter() {
+        if !r.party_id.is_empty() {
+            *id_count.entry(r.party_id.clone()).or_insert(0) += 1;
+        }
+    }
+    for r in rows.iter_mut() {
+        r.party_size = if r.party_id.is_empty() {
+            1
+        } else {
+            id_count.get(&r.party_id).copied().unwrap_or(1)
+        };
     }
 }
 
@@ -1095,22 +1329,96 @@ pub fn refresh_rows(
 mod tests {
     use super::*;
 
+    fn row(puuid: &str) -> PlayerRow {
+        PlayerRow {
+            puuid: puuid.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn infers_enemy_party_from_shared_history() {
+        let mut rows = vec![row("a"), row("b"), row("c")];
+        let party_map = HashMap::new();
+        let mut mates: HashMap<String, HashSet<String>> = HashMap::new();
+        mates.insert("a".to_string(), HashSet::from(["b".to_string()]));
+        apply_parties(&mut rows, &party_map, &mates);
+        assert_eq!(rows[0].party_id, "h:a");
+        assert_eq!(rows[1].party_id, "h:a");
+        assert_eq!(rows[0].party_size, 2);
+        assert_eq!(rows[1].party_size, 2);
+        assert!(rows[2].party_id.is_empty());
+        assert_eq!(rows[2].party_size, 1);
+    }
+
+    #[test]
+    fn presence_party_is_not_overwritten_by_inference() {
+        let mut rows = vec![row("a"), row("b")];
+        let mut party_map = HashMap::new();
+        party_map.insert("a".to_string(), "real-party".to_string());
+        // History would otherwise pair a with b, but a has a presence id.
+        let mut mates: HashMap<String, HashSet<String>> = HashMap::new();
+        mates.insert("a".to_string(), HashSet::from(["b".to_string()]));
+        apply_parties(&mut rows, &party_map, &mates);
+        assert_eq!(rows[0].party_id, "real-party");
+        assert_eq!(rows[0].party_size, 1);
+        assert!(rows[1].party_id.is_empty());
+        assert_eq!(rows[1].party_size, 1);
+    }
+
+    #[test]
+    fn lone_player_stays_size_one() {
+        let mut rows = vec![row("a")];
+        apply_parties(&mut rows, &HashMap::new(), &HashMap::new());
+        assert!(rows[0].party_id.is_empty());
+        assert_eq!(rows[0].party_size, 1);
+    }
+
+    #[test]
+    fn kast_counts_kill_survive_and_trade() {
+        // Round 1: player p got a kill (qualifies).
+        // Round 2: p died with no kill, assist, or trade (does not qualify).
+        // Round 3: p died but teammate t traded the killer e within 3000ms
+        // (qualifies). p is present in every round.
+        let v: Value = serde_json::from_str(
+            r#"{"roundResults":[
+              {"playerStats":[
+                {"subject":"p","kills":[{"killer":"p","victim":"e","roundTime":1000,"assistants":[]}]},
+                {"subject":"e","kills":[]}
+              ]},
+              {"playerStats":[
+                {"subject":"p","kills":[]},
+                {"subject":"e","kills":[{"killer":"e","victim":"p","roundTime":2000,"assistants":[]}]}
+              ]},
+              {"playerStats":[
+                {"subject":"p","kills":[]},
+                {"subject":"t","kills":[{"killer":"t","victim":"e","roundTime":2500,"assistants":[]}]},
+                {"subject":"e","kills":[{"killer":"e","victim":"p","roundTime":1500,"assistants":[]}]}
+              ]}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(kast_rounds(&v, "p"), (2, 3));
+    }
+
     #[test]
     fn parses_mmr_current_and_peak() {
-        // Peak must come from WinsByTier (tiers achieved), not the lower
-        // season-end CompetitiveTier. Here the player ended at 23 but peaked 25.
+        // Current rank comes from the active act's CompetitiveTier and
+        // RankedRating, not the last-game TierAfterUpdate. Peak comes from
+        // WinsByTier (tiers achieved), not the lower season-end tier: the player
+        // ended s2 at 23 but peaked 25.
         let v: Value = serde_json::from_str(
             r#"{
               "LatestCompetitiveUpdate":{"TierAfterUpdate":23,"RankedRatingAfterUpdate":42,"SeasonID":"s2"},
               "QueueSkills":{"competitive":{"SeasonalInfoBySeasonID":{
                 "s1":{"CompetitiveTier":18,"WinsByTier":{"17":3,"18":5}},
-                "s2":{"CompetitiveTier":23,"WinsByTier":{"24":4,"25":2},"NumberOfWins":7,"NumberOfWinsWithPlacements":10,"NumberOfGames":15,"LeaderboardRank":0}
+                "s2":{"CompetitiveTier":23,"RankedRating":55,"WinsByTier":{"24":4,"25":2},"NumberOfWins":7,"NumberOfWinsWithPlacements":10,"NumberOfGames":15,"LeaderboardRank":0}
               }}}}"#,
         )
         .unwrap();
-        let m = parse_mmr(&v);
+        let m = parse_mmr(&v, "s2");
         assert_eq!(m.tier, 23);
-        assert_eq!(m.rr, 42);
+        assert_eq!(m.rr, 55);
         assert_eq!(m.peak, 25);
         assert_eq!(m.peak_season, "s2");
         // wins must include placement wins (10), not the lower NumberOfWins (7)
@@ -1120,9 +1428,52 @@ mod tests {
     }
 
     #[test]
+    fn parses_mmr_unranked_when_act_absent() {
+        // Player has prior-act history but no entry for the current act, so the
+        // current rank reads Unranked while peak still reflects past acts.
+        let v: Value = serde_json::from_str(
+            r#"{
+              "LatestCompetitiveUpdate":{"TierAfterUpdate":23,"RankedRatingAfterUpdate":42,"SeasonID":"s2"},
+              "QueueSkills":{"competitive":{"SeasonalInfoBySeasonID":{
+                "s1":{"CompetitiveTier":18,"WinsByTier":{"17":3,"18":5}},
+                "s2":{"CompetitiveTier":23,"WinsByTier":{"24":4,"25":2}}
+              }}}}"#,
+        )
+        .unwrap();
+        let m = parse_mmr(&v, "s3");
+        assert_eq!(m.tier, 0);
+        assert_eq!(m.rr, 0);
+        assert_eq!(m.games, 0);
+        assert_eq!(m.wins, 0);
+        // peak still reflects the best tier ever reached
+        assert_eq!(m.peak, 25);
+        assert_eq!(m.peak_season, "s2");
+    }
+
+    #[test]
+    fn parses_mmr_falls_back_without_act() {
+        // Empty current_act means the content fetch failed, so degrade to the
+        // last competitive game's tier and rr.
+        let v: Value = serde_json::from_str(
+            r#"{
+              "LatestCompetitiveUpdate":{"TierAfterUpdate":23,"RankedRatingAfterUpdate":42,"SeasonID":"s2"},
+              "QueueSkills":{"competitive":{"SeasonalInfoBySeasonID":{
+                "s2":{"CompetitiveTier":23,"WinsByTier":{"24":4,"25":2},"NumberOfWinsWithPlacements":10,"NumberOfGames":15}
+              }}}}"#,
+        )
+        .unwrap();
+        let m = parse_mmr(&v, "");
+        assert_eq!(m.tier, 23);
+        assert_eq!(m.rr, 42);
+        assert_eq!(m.games, 15);
+        assert_eq!(m.wins, 10);
+        assert_eq!(m.peak, 25);
+    }
+
+    #[test]
     fn parses_mmr_handles_missing() {
         let v: Value = serde_json::from_str("{}").unwrap();
-        assert_eq!(parse_mmr(&v), Mmr::default());
+        assert_eq!(parse_mmr(&v, ""), Mmr::default());
     }
 
     #[test]

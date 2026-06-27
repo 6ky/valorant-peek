@@ -2,7 +2,10 @@ use crate::auth::fetch_auth;
 use crate::client_version::{detect_region_from_log, fetch_client_version, Region};
 use crate::discord::{resolve_app_id, Rpc};
 use crate::encounter::EncounterStore;
-use crate::fetcher::{build_rows, build_self, enrich_combat, fetch_history, refresh_rows, MatchStats};
+use crate::fetcher::{
+    build_rows, build_self, enrich_combat, fetch_current_act, fetch_history, refresh_rows,
+    MatchStats,
+};
 use std::collections::{HashMap, HashSet};
 use crate::lockfile::read_lockfile;
 use crate::match_state::current_state;
@@ -69,6 +72,7 @@ async fn poll_once(
     sd: &StaticData,
     region: &Region,
     version: &mut Option<String>,
+    current_act: &mut Option<String>,
     last: &MatchView,
     last_match_id: &mut Option<String>,
     last_loop_state: &mut String,
@@ -77,6 +81,7 @@ async fn poll_once(
     encounters: &mut EncounterStore,
     combat_done: &mut Option<String>,
     combat_attempted: &mut HashSet<String>,
+    mates_map: &mut HashMap<String, HashSet<String>>,
     fetch_combat: bool,
 ) -> Option<MatchView> {
     let lf = match read_lockfile() {
@@ -92,12 +97,25 @@ async fn poll_once(
     }
     let v = version.clone()?;
 
+    // The active act rarely changes, so fetch it once per session. If the
+    // content service is unavailable it stays None and parse_mmr falls back to
+    // the last competitive game's tier.
+    if current_act.is_none() {
+        *current_act = fetch_current_act(&ctx, region, &v).await;
+    }
+    let act = current_act.as_deref().unwrap_or("");
+
+    // Ally party ids come from the local presence feed (covers the whole allied
+    // team in a match). A cheap local call, so fetch it up front for build_self,
+    // build_rows, and enrich_combat. Enemies are absent here and inferred later.
+    let party_map = crate::presence::fetch_party_map(&lf).await;
+
     // Refresh the profile only periodically (or if we have none yet). Keep the
     // last known value on a transient failure instead of flashing unranked.
     *self_tick = self_tick.wrapping_add(1);
     let refresh_self = last.me.is_none() || *self_tick % SELF_REFRESH_EVERY == 0;
     let me = if refresh_self {
-        build_self(&ctx, region, &v, sd).await.or_else(|| last.me.clone())
+        build_self(&ctx, region, &v, act, sd, &party_map).await.or_else(|| last.me.clone())
     } else {
         last.me.clone()
     };
@@ -206,7 +224,7 @@ async fn poll_once(
         // Phase one: ranks, names, agents, party, and skins only, so the roster
         // appears fast. Combat stats are filled in by a throttled second pass.
         let mut fetched =
-            build_rows(&ctx, region, &v, &raw, sd, &last.players, false, cg_match_id).await;
+            build_rows(&ctx, region, &v, act, &raw, sd, &last.players, &party_map, false, cg_match_id).await;
         // Show how often we have seen each player and our record with them, then
         // record this game so later lobbies can show it. Reading the prior count
         // before recording keeps the current match out of the shown total.
@@ -233,6 +251,7 @@ async fn poll_once(
         *last_match_id = match_id;
         *combat_done = None;
         combat_attempted.clear();
+        mates_map.clear();
         fetched
     };
 
@@ -255,7 +274,7 @@ async fn poll_once(
             combat_loading = true;
             if same_match {
                 let chunk: Vec<String> = pending.into_iter().take(COMBAT_CHUNK).collect();
-                enrich_combat(&ctx, region, &v, &mut rows, &chunk).await;
+                enrich_combat(&ctx, region, &v, &mut rows, &chunk, mates_map, &party_map).await;
                 for puuid in &chunk {
                     combat_attempted.insert(puuid.clone());
                 }
@@ -294,6 +313,7 @@ pub async fn run_loop(
     let mut encounters = EncounterStore::load(base_dir.join("encounters.json"));
     let region = resolve_region();
     let mut version = fetch_client_version().await.ok();
+    let mut current_act: Option<String> = None;
     let mut last = assemble_view(MatchState::NoGame, String::new(), Vec::new(), false);
 
     let start = std::time::SystemTime::now()
@@ -307,6 +327,7 @@ pub async fn run_loop(
     let mut match_cache: HashMap<String, MatchStats> = HashMap::new();
     let mut combat_done: Option<String> = None;
     let mut combat_attempted: HashSet<String> = HashSet::new();
+    let mut mates_map: HashMap<String, HashSet<String>> = HashMap::new();
 
     // Wake on presence changes from the local websocket, falling back to the
     // poll interval below if the socket is unavailable.
@@ -319,6 +340,7 @@ pub async fn run_loop(
             &static_data,
             &region,
             &mut version,
+            &mut current_act,
             &last,
             &mut last_match_id,
             &mut last_loop_state,
@@ -327,6 +349,7 @@ pub async fn run_loop(
             &mut encounters,
             &mut combat_done,
             &mut combat_attempted,
+            &mut mates_map,
             combat_on,
         )
         .await
@@ -351,13 +374,19 @@ pub async fn run_loop(
         rpc.update(&view, rpc_enabled.load(Ordering::Relaxed));
 
         // While combat stats are still filling in, poll again almost at once so
-        // the next batch lands quickly. Otherwise wait the normal interval,
-        // reacting sooner to a websocket presence change.
+        // the next batch lands quickly. In agent select, poll faster so hover and
+        // lock changes (which the presence socket does not carry) stay live.
+        // Otherwise wait the normal interval, reacting sooner to a websocket
+        // presence change.
         if view.combat_loading {
             tokio::time::sleep(Duration::from_millis(250)).await;
         } else {
+            let interval = match view.state {
+                MatchState::PreGame => Duration::from_millis(1200),
+                _ => Duration::from_secs(3),
+            };
             tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(3)) => {}
+                _ = tokio::time::sleep(interval) => {}
                 _ = wake.notified() => {}
             }
         }

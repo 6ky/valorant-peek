@@ -37,12 +37,14 @@ impl StaticData {
         self.tier_icons.get(&tier).cloned().unwrap_or_default()
     }
 
+    // Riot returns character and skin ids in mixed case, but valorant-api keys
+    // them lowercase, so normalize before looking up.
     pub fn agent_name(&self, id: &str) -> String {
-        self.agents.get(id).cloned().unwrap_or_default()
+        self.agents.get(&id.to_lowercase()).cloned().unwrap_or_default()
     }
 
     pub fn agent_icon(&self, id: &str) -> String {
-        self.agent_icons.get(id).cloned().unwrap_or_default()
+        self.agent_icons.get(&id.to_lowercase()).cloned().unwrap_or_default()
     }
 
     pub fn map_name(&self, map_url: &str) -> String {
@@ -54,7 +56,7 @@ impl StaticData {
     }
 
     pub fn skin_info(&self, skin_id: &str) -> Option<&SkinInfo> {
-        self.skins.get(skin_id)
+        self.skins.get(&skin_id.to_lowercase())
     }
 
     pub fn tier_color(&self, tier_uuid: &str) -> String {
@@ -62,7 +64,7 @@ impl StaticData {
     }
 
     pub fn card_art(&self, id: &str) -> String {
-        self.card_arts.get(id).cloned().unwrap_or_default()
+        self.card_arts.get(&id.to_lowercase()).cloned().unwrap_or_default()
     }
 
     pub fn season_label(&self, uuid: &str) -> String {

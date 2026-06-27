@@ -35,6 +35,10 @@ pub struct PlayerRow {
     pub last_kills: u32,
     pub last_deaths: u32,
     pub last_hs: u32,
+    pub last_acs: u32,
+    pub last_adr: u32,
+    pub last_kast: u32,
+    pub last_assists: u32,
     pub has_combat: bool,
     // Signed run of recent competitive results: positive is a win streak,
     // negative a loss streak, zero when the last result broke the run.
