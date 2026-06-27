@@ -644,7 +644,7 @@ pub async fn fetch_player_recent(
     let (mut head, mut body, mut leg) = (0u64, 0u64, 0u64);
     let (mut total_assists, mut total_score, mut total_damage) = (0u64, 0u64, 0u64);
     let (mut total_kast, mut total_rounds) = (0u64, 0u64);
-    let mut mates: HashSet<String> = HashSet::new();
+    let mut mate_counts: HashMap<String, u32> = HashMap::new();
     let mut level = 0u32;
     for detail in details.into_iter().flatten() {
         let players = detail.get("players").and_then(|p| p.as_array());
@@ -671,8 +671,9 @@ pub async fn fetch_player_recent(
             // real value even for players who hid it live. Keep the highest seen,
             // which is the most recent.
             level = level.max(me.get("accountLevel").and_then(|v| v.as_u64()).unwrap_or(0) as u32);
-            // Anyone sharing this player's non-empty partyId in this match is a
-            // teammate who queued with them, so likely a premade.
+            // Count how many recent matches each other player shared this
+            // player's party in. Co-queuing once is often incidental, so the
+            // caller only treats repeat co-queues as a likely current premade.
             let my_party = me.get("partyId").and_then(|v| v.as_str()).unwrap_or("");
             if !my_party.is_empty() {
                 if let Some(arr) = players {
@@ -680,7 +681,7 @@ pub async fn fetch_player_recent(
                         let subj = other.get("subject").and_then(|v| v.as_str()).unwrap_or("");
                         let party = other.get("partyId").and_then(|v| v.as_str()).unwrap_or("");
                         if subj != puuid && !subj.is_empty() && party == my_party {
-                            mates.insert(subj.to_string());
+                            *mate_counts.entry(subj.to_string()).or_insert(0) += 1;
                         }
                     }
                 }
@@ -707,7 +708,11 @@ pub async fn fetch_player_recent(
         rr_trend,
         wins: recent_wins,
         losses: recent_losses,
-        mates: mates.into_iter().collect(),
+        mates: mate_counts
+            .into_iter()
+            .filter(|(_, count)| *count >= 2)
+            .map(|(subj, _)| subj)
+            .collect(),
         level,
     })
 }
@@ -1240,6 +1245,15 @@ pub async fn build_rows(
                 }
             }
         }
+        // Keep a level recovered from match history across a rebuild, since the
+        // live payload zeroes it for players who hide it.
+        if row.account_level == 0 {
+            if let Some(prev) = last_rows.iter().find(|r| r.puuid == p.puuid) {
+                if prev.account_level > 0 {
+                    row.account_level = prev.account_level;
+                }
+            }
+        }
         rows.push(row);
     }
     rows
@@ -1438,7 +1452,12 @@ pub fn refresh_rows(
             row.agent_icon = sd.agent_icon(&p.character_id);
             row.player_card = sd.card_art(&p.player_card_id);
             row.locked = p.locked;
-            row.account_level = p.account_level;
+            // The live payload reports 0 for a hidden level, so only let a real
+            // value update it. Otherwise this would wipe a level recovered from
+            // match history every poll.
+            if p.account_level > 0 {
+                row.account_level = p.account_level;
+            }
             row
         })
         .collect()
