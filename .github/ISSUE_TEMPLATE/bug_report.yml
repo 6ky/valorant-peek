@@ -1,0 +1,51 @@
+name: Bug report
+description: Something in Peek is broken or wrong
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What went wrong, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Peek
+        2. Queue a competitive game
+        3. ...
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Peek version
+      description: The release you installed.
+      placeholder: 0.2.2
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 23H2
+    validations:
+      required: false
+  - type: input
+    id: region
+    attributes:
+      label: Region
+      description: Your VALORANT region, if the issue looks region related.
+      placeholder: eu
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Screenshots or notes. Do not paste tokens or anything out of the lockfile.
+    validations:
+      required: false

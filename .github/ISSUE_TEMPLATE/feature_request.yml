@@ -1,0 +1,17 @@
+name: Feature request
+description: Suggest something for Peek
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What you want, and what it would help you read in a match.
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+    validations:
+      required: false
