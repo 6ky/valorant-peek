@@ -193,7 +193,14 @@ async fn poll_once(
     // fixed. In agent select we keep refetching so picks, lock state, and the
     // countdown stay current. Even while reusing, the live score and map are
     // refreshed from presence, which we read every poll.
-    let settled = !last.players.is_empty()
+    // Do not settle on a half-loaded roster: a real two-team game must have an
+    // enemy present, otherwise the core-game endpoint has only returned the
+    // allied half so far and we keep fetching. Free-for-all modes have no teams,
+    // so the check does not apply to them.
+    let roster_loaded =
+        is_ffa(&queue_id) || last.players.iter().any(|r| r.team == "Enemy");
+    let settled = roster_loaded
+        && !last.players.is_empty()
         && loop_state == "INGAME"
         && last.state == MatchState::CoreGame
         && (!fetch_combat || combat_done.as_deref() == last_match_id.as_deref());
@@ -208,7 +215,7 @@ async fn poll_once(
         return Some(view);
     }
 
-    let cs = current_state(&ctx, region, &v).await;
+    let cs = current_state(&ctx, region, &v, loop_state).await;
     let state = cs.state;
     let match_id = cs.match_id;
     let cur_match_id = match_id.clone();
@@ -219,9 +226,16 @@ async fn poll_once(
         return Some(with_me(assemble_view(state, mode, Vec::new(), false)));
     }
 
-    // Fetch every player's rank only when the match changes. Within the same
-    // match, refresh the cheap fields (agent, team) and keep cached ranks.
-    let same_match = match_id.is_some() && *last_match_id == match_id && !last.players.is_empty();
+    // Fetch every player's rank only when the match changes, or when new players
+    // (the late-arriving enemy half) appear and need their ranks, names and
+    // loadouts fetched. Within a fully loaded match, refresh only the cheap
+    // fields (agent, team, lock state) and keep the cached ranks.
+    let roster_complete = raw
+        .iter()
+        .all(|p| last.players.iter().any(|r| r.puuid == p.puuid));
+    let new_match = match_id.is_some() && *last_match_id != match_id;
+    let same_match =
+        !new_match && match_id.is_some() && !last.players.is_empty() && roster_complete;
     let mut rows = if same_match {
         refresh_rows(&last.players, &raw, sd, &ctx.puuid)
     } else {
@@ -238,7 +252,6 @@ async fn poll_once(
         // Show how often we have seen each player and our record with them, then
         // record this game so later lobbies can show it. Reading the prior count
         // before recording keeps the current match out of the shown total.
-        let now = unix_secs();
         for row in &mut fetched {
             if row.puuid == ctx.puuid {
                 continue;
@@ -248,20 +261,25 @@ async fn poll_once(
             row.encounter_wins = wins;
             row.encounter_losses = losses;
         }
-        if state == MatchState::CoreGame {
-            if let Some(mid) = match_id.as_deref() {
-                let roster: Vec<(String, String, u32)> = fetched
-                    .iter()
-                    .filter(|r| r.puuid != ctx.puuid)
-                    .map(|r| (r.puuid.clone(), r.name.clone(), r.rank_tier))
-                    .collect();
-                encounters.record_seen(mid, &roster, now);
+        // Record the encounter and restart the combat pass only when a new match
+        // begins, not on a rebuild that just added the late enemy half.
+        if new_match {
+            if state == MatchState::CoreGame {
+                if let Some(mid) = match_id.as_deref() {
+                    let now = unix_secs();
+                    let roster: Vec<(String, String, u32)> = fetched
+                        .iter()
+                        .filter(|r| r.puuid != ctx.puuid)
+                        .map(|r| (r.puuid.clone(), r.name.clone(), r.rank_tier))
+                        .collect();
+                    encounters.record_seen(mid, &roster, now);
+                }
             }
+            *combat_done = None;
+            combat_attempted.clear();
+            mates_map.clear();
         }
         *last_match_id = match_id;
-        *combat_done = None;
-        combat_attempted.clear();
-        mates_map.clear();
         fetched
     };
 

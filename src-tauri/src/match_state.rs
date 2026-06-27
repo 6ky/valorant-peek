@@ -76,53 +76,84 @@ pub struct CurrentState {
     pub phase_time: u32,
 }
 
-pub async fn current_state(ctx: &AuthContext, region: &Region, version: &str) -> CurrentState {
+async fn try_coregame(
+    ctx: &AuthContext,
+    region: &Region,
+    headers: &reqwest::header::HeaderMap,
+) -> Option<CurrentState> {
+    let player = format!("{}/core-game/v1/players/{}", region.glz_base(), ctx.puuid);
+    let mid = match_id(&player, headers).await?;
+    let murl = format!("{}/core-game/v1/matches/{}", region.glz_base(), mid);
+    let players = fetch_doc(&murl, headers)
+        .await
+        .map(|v| parse_match_players(&v))
+        .unwrap_or_default();
+    Some(CurrentState {
+        state: MatchState::CoreGame,
+        match_id: Some(mid),
+        players,
+        phase_time: 0,
+    })
+}
+
+async fn try_pregame(
+    ctx: &AuthContext,
+    region: &Region,
+    headers: &reqwest::header::HeaderMap,
+) -> Option<CurrentState> {
+    let player = format!("{}/pregame/v1/players/{}", region.glz_base(), ctx.puuid);
+    let mid = match_id(&player, headers).await?;
+    let murl = format!("{}/pregame/v1/matches/{}", region.glz_base(), mid);
+    let doc = fetch_doc(&murl, headers).await;
+    let players = doc
+        .as_ref()
+        .and_then(|v| v.get("AllyTeam"))
+        .map(parse_match_players)
+        .unwrap_or_default();
+    let phase_time = doc
+        .as_ref()
+        .and_then(|v| v.get("PhaseTimeRemainingNS"))
+        .and_then(|v| v.as_u64())
+        .map(|ns| (ns / 1_000_000_000) as u32)
+        .unwrap_or(0);
+    Some(CurrentState {
+        state: MatchState::PreGame,
+        match_id: Some(mid),
+        players,
+        phase_time,
+    })
+}
+
+// Resolve the live match. The presence loop state decides which endpoint is
+// authoritative: in agent select the pregame endpoint wins, since custom games
+// can provision a core-game match early and checking core-game first would
+// misread agent select as an active game (breaking pick and lock display). The
+// other endpoint is still tried as a fallback for the brief phase transitions.
+pub async fn current_state(
+    ctx: &AuthContext,
+    region: &Region,
+    version: &str,
+    loop_state: &str,
+) -> CurrentState {
     let headers = pvp_headers(ctx, version);
-
-    let cg_player = format!("{}/core-game/v1/players/{}", region.glz_base(), ctx.puuid);
-    if let Some(mid) = match_id(&cg_player, &headers).await {
-        let murl = format!("{}/core-game/v1/matches/{}", region.glz_base(), mid);
-        let players = fetch_doc(&murl, &headers)
-            .await
-            .map(|v| parse_match_players(&v))
-            .unwrap_or_default();
-        return CurrentState {
-            state: MatchState::CoreGame,
-            match_id: Some(mid),
-            players,
-            phase_time: 0,
-        };
-    }
-
-    let pg_player = format!("{}/pregame/v1/players/{}", region.glz_base(), ctx.puuid);
-    if let Some(mid) = match_id(&pg_player, &headers).await {
-        let murl = format!("{}/pregame/v1/matches/{}", region.glz_base(), mid);
-        let doc = fetch_doc(&murl, &headers).await;
-        let players = doc
-            .as_ref()
-            .and_then(|v| v.get("AllyTeam"))
-            .map(parse_match_players)
-            .unwrap_or_default();
-        let phase_time = doc
-            .as_ref()
-            .and_then(|v| v.get("PhaseTimeRemainingNS"))
-            .and_then(|v| v.as_u64())
-            .map(|ns| (ns / 1_000_000_000) as u32)
-            .unwrap_or(0);
-        return CurrentState {
-            state: MatchState::PreGame,
-            match_id: Some(mid),
-            players,
-            phase_time,
-        };
-    }
-
-    CurrentState {
+    let pregame_first = loop_state == "PREGAME";
+    let found = if pregame_first {
+        match try_pregame(ctx, region, &headers).await {
+            Some(s) => Some(s),
+            None => try_coregame(ctx, region, &headers).await,
+        }
+    } else {
+        match try_coregame(ctx, region, &headers).await {
+            Some(s) => Some(s),
+            None => try_pregame(ctx, region, &headers).await,
+        }
+    };
+    found.unwrap_or(CurrentState {
         state: MatchState::Menu,
         match_id: None,
         players: Vec::new(),
         phase_time: 0,
-    }
+    })
 }
 
 #[cfg(test)]

@@ -570,11 +570,8 @@ fn win_loss(matches: &[Value]) -> (u32, u32) {
     (wins, losses)
 }
 
-// Number of recent competitive matches to aggregate K/D and headshot% over.
+// Number of recent competitive matches to aggregate K/D, ACS and headshot% over.
 const RECENT_GAMES: usize = 10;
-// Match-detail request budget split across the roster, so a big lobby fetches
-// fewer games per player and stays under the rate limit.
-const RECENT_GAMES_BUDGET: usize = 50;
 // Caps so a heavy roster load cannot burst into a rate limit: match-detail
 // requests in flight per player, and players fetched at once across the roster.
 // Product is the max requests in flight (3 x 2 = 6), kept low like vry, which
@@ -601,6 +598,9 @@ pub struct RecentForm {
     pub wins: u32,
     pub losses: u32,
     pub mates: Vec<String>,
+    // The player's real account level, read from match details where it is not
+    // zeroed for players who hide it in the live game.
+    pub level: u32,
 }
 
 pub async fn fetch_player_recent(
@@ -645,6 +645,7 @@ pub async fn fetch_player_recent(
     let (mut total_assists, mut total_score, mut total_damage) = (0u64, 0u64, 0u64);
     let (mut total_kast, mut total_rounds) = (0u64, 0u64);
     let mut mates: HashSet<String> = HashSet::new();
+    let mut level = 0u32;
     for detail in details.into_iter().flatten() {
         let players = detail.get("players").and_then(|p| p.as_array());
         let me = players.and_then(|arr| {
@@ -666,6 +667,10 @@ pub async fn fetch_player_recent(
             let (qual, present) = kast_rounds(&detail, puuid);
             total_kast += qual as u64;
             total_rounds += present as u64;
+            // Account level lives at the top of the player object here and is the
+            // real value even for players who hid it live. Keep the highest seen,
+            // which is the most recent.
+            level = level.max(me.get("accountLevel").and_then(|v| v.as_u64()).unwrap_or(0) as u32);
             // Anyone sharing this player's non-empty partyId in this match is a
             // teammate who queued with them, so likely a premade.
             let my_party = me.get("partyId").and_then(|v| v.as_str()).unwrap_or("");
@@ -703,6 +708,7 @@ pub async fn fetch_player_recent(
         wins: recent_wins,
         losses: recent_losses,
         mates: mates.into_iter().collect(),
+        level,
     })
 }
 
@@ -1045,6 +1051,9 @@ pub async fn build_rows(
 ) -> Vec<PlayerRow> {
     let puuids: Vec<String> = players.iter().map(|p| p.puuid.clone()).collect();
     let names = fetch_names(ctx, region, version, &puuids).await;
+    // Our own level from the self-only account-xp endpoint, so it still shows
+    // when we have hidden it (Riot zeroes the hidden level in the match payload).
+    let self_level = fetch_account_level(ctx, region, version, &ctx.puuid).await;
 
     let self_team = players
         .iter()
@@ -1115,10 +1124,14 @@ pub async fn build_rows(
         } else {
             names.get(&p.puuid).cloned().unwrap_or_default()
         };
-        // Riot still includes the real account level even when a player turns on
-        // "hide account level", so show it like the other trackers do rather than
-        // honoring the flag and blanking it.
-        let account_level = p.account_level;
+        // Riot zeroes a hidden account level in the match payload and there is no
+        // way to read another player's hidden level. For ourselves we fall back
+        // to the account-xp value, which is ours to read.
+        let account_level = if is_self && self_level > 0 {
+            self_level
+        } else {
+            p.account_level
+        };
         let (last_kills, last_deaths, last_hs, streak, rr_trend, recent_wins, recent_losses, has_combat) =
             match combat {
                 Some(r) => (r.kills, r.deaths, r.hs, r.streak, r.rr_trend, r.wins, r.losses, true),
@@ -1245,10 +1258,12 @@ pub async fn enrich_combat(
     mates_map: &mut HashMap<String, HashSet<String>>,
     party_map: &HashMap<String, String>,
 ) {
-    // Split the match-detail budget across the whole roster so a big lobby
-    // fetches fewer games per player and stays under the rate limit, even when
-    // only a subset is being filled in this pass.
-    let games = (RECENT_GAMES_BUDGET / rows.len().max(1)).clamp(1, RECENT_GAMES);
+    // Aggregate every player's stats over the same number of recent games
+    // regardless of lobby size. The combat pass is already throttled (a few
+    // players per poll, a couple of match details in flight each), and the 429
+    // backoff covers the rest, so a full lobby stays under the rate limit while
+    // still averaging over the full window rather than a thin slice.
+    let games = RECENT_GAMES;
     let mut updates: Vec<(String, Option<RecentForm>)> = Vec::with_capacity(puuids.len());
     for chunk in puuids.chunks(COMBAT_PLAYER_CONCURRENCY) {
         let part = futures::future::join_all(chunk.iter().map(|puuid| async move {
@@ -1273,6 +1288,11 @@ pub async fn enrich_combat(
                 row.rr_trend = r.rr_trend;
                 row.recent_wins = r.wins;
                 row.recent_losses = r.losses;
+                // Fill in a hidden player's level from their match history, since
+                // the live game zeroes it. Leave a visible live level alone.
+                if row.account_level == 0 && r.level > 0 {
+                    row.account_level = r.level;
+                }
                 row.has_combat = true;
             }
         }
